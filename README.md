@@ -98,17 +98,13 @@ fills in the real fields, presses the real buttons, and then reads the ledger th
 ```powershell
 python tools/build.py                       # the window, no console
 python tools/build.py --console             # the same, but with a console -- the one that can be checked
-python tools/build.py --icon path\to.ico
+python tools/build.py --icon path\to.ico    # a different icon than the one that ships
 ```
 
 One file, about 13 MB, no runtime to install. `--python` points at the interpreter that has
 PyInstaller, which is a dependency of *building* the tool and not of using it. The work directory
 goes to the system temp area, because a build leaves a great deal behind that nobody wants in a
-source tree.
-
-**There is no icon by default.** An icon is identity, and this tool ships without an identity of its
-own: putting someone's mark on a general-purpose tool is a decision for whoever owns the mark, not
-one for a build script to make quietly. `--icon` is how that decision gets expressed.
+source tree. The build uses `mark/onlysign.ico`; `--no-icon` leaves it off.
 
 The packaged binary has two doors: started with no arguments it opens the window, started with a
 command (`scan`, `certs`, `sign`, `check`, `trust`) it behaves like the command line. That is what

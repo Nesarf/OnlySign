@@ -8,10 +8,6 @@ PyInstaller is the only thing this needs, and it is not a dependency of the tool
 of *building the tool*. The Python it runs under is `--python` (the interpreter running this script
 by default), so a machine that keeps a packaging environment separate can point at it.
 
-There is no icon by default. An icon is identity, and this tool ships without an identity of its own
--- putting someone's mark on a general-purpose tool is a decision for whoever owns the mark, not one
-for a build script to make quietly. `--icon` is how that decision gets expressed.
-
 The work directory goes to the system temp area rather than the project, because a build leaves a
 great deal behind that nobody wants to see in a source tree.
 """
@@ -46,15 +42,19 @@ def main(argv: list[str] | None = None) -> int:
                         help="the interpreter that has PyInstaller")
     parser.add_argument("--console", action="store_true",
                         help="keep a console -- the build that can be tested")
-    parser.add_argument("--icon", default="", help="an .ico to use; none by default")
+    parser.add_argument("--icon", default=os.path.join(ROOT, "mark", "onlysign.ico"),
+                        help="the .ico to use; the one in mark/ by default")
+    parser.add_argument("--no-icon", action="store_true", help="build without an icon")
     parser.add_argument("--name", default="OnlySign")
-    parser.add_argument("--out", default=os.path.join(ROOT, "dist"))
+    parser.add_argument("--out", default=os.path.join(ROOT, "dist"),
+                        help="where the built executable goes; made absolute before use")
     parser.add_argument("--keep-work", action="store_true")
     args = parser.parse_args(argv)
 
     version = pyinstaller_version(args.python)
     print(f"PyInstaller {version} under {args.python}")
 
+    args.out = os.path.abspath(args.out)
     work = tempfile.mkdtemp(prefix="onlysign-build-")
     arguments = [
         args.python, "-m", "PyInstaller", "--noconfirm", "--onefile",
@@ -71,10 +71,17 @@ def main(argv: list[str] | None = None) -> int:
         arguments += ["--add-data", notice_file + os.pathsep + "."]
     else:
         print("note: NOTICE.txt is missing, so the build will carry the notice without its mark")
+    if args.no_icon:
+        args.icon = ""
     if args.icon:
-        if not os.path.isfile(args.icon):
-            raise SystemExit(f"no icon at {args.icon}")
-        arguments += ["--icon", args.icon]
+        # Absolute, because PyInstaller resolves a relative icon path against the spec directory it
+        # was handed -- which lives in the temp work area -- and not against where the build was
+        # started. A relative path here fails with 'icon input file not found' and the path it names
+        # is one nobody typed.
+        icon = os.path.abspath(args.icon)
+        if not os.path.isfile(icon):
+            raise SystemExit(f"no icon at {args.icon}  (looked in {icon})")
+        arguments += ["--icon", icon]
     arguments.append(ENTRY)
 
     print("building (this takes a minute) ...")
