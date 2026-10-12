@@ -107,6 +107,11 @@ PHRASES: dict[str, dict[str, str]] = {
                       "+-------------------------+"},
     "starting": {"en": "Starting the installer...", "zh": "正在启动安装程序…",
                  "ja": "取り付けを始めます…"},
+    # The closing line for a run that did not finish. Same register as declining: the thing could not
+    # be done, said plainly and once, rather than a stack of adjectives.
+    "signing_failed": {"en": "The signing could not be carried out.",
+                       "zh": "签名不能在这一刻完成。",
+                       "ja": "署名は今この時点では行えません。"},
     "answered_cli": {"en": "   [answered on the command line]", "zh": "   [已在命令行上作答]",
                      "ja": "   [命令行で答えました]"},
     "answer_again": {"en": "Please answer Y or N.", "zh": "请回答 Y 或 N。",

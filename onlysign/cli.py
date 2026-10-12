@@ -23,6 +23,7 @@ import sys
 from typing import Any
 
 from . import notice
+from . import phrases
 from .notice import text as notice_text
 from .engine import audit, certs, discover, gate, ledger, pe, signer, trust, workflow
 
@@ -157,6 +158,13 @@ def _cmd_sign(args: argparse.Namespace) -> int:
     print(f"ledger: {plan.ledger_at()}")
     for line in workflow.describe_outcome(outcome):
         print(line)
+
+    # Flavour belongs where a person is reading. A pipe gets the facts and nothing else: a script
+    # parsing this has no use for a banner, and every reason not to have to skip past one.
+    if notice.interactive():
+        closing = phrases.table(getattr(args, "language", ""))
+        print()
+        print(closing.get("signing_failed" if outcome.failed else "bonfire", ""))
     return 1 if outcome.failed else 0
 
 

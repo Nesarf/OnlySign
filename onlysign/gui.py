@@ -908,6 +908,13 @@ class Window:
             self.say(self.t(i18n_key="say.ledger", path=plan.ledger_at()), "quiet")
             for line in self._outcome_lines(value):
                 self.say(line, "bad" if value.failed else "")
+            # The closing line, and only where a person is reading: the same words the gate answers a
+            # yes with when it worked, and the same register as declining when it did not.
+            self.say("")
+            if value.failed:
+                self.say(self.t(i18n_key="signing_failed"), "bad")
+            else:
+                self.say(ascii_banner(), "good")
 
         self._run(lambda: workflow.execute(plan, dry_run=False), done)
 
