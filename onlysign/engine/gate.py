@@ -213,7 +213,7 @@ if ($args -contains '-Yes' -or $args -contains '--yes') {
 
 if ($answer -ne 'y' -and $answer -ne 'yes') {
     Write-Host ''
-    Write-Host (P 'not_started' 'The installation cannot be carried out at this moment.')
+    Write-Host (P 'not_started' 'The door cannot be opened from this side.')
     exit 0
 }
 
