@@ -184,9 +184,12 @@ def _container_signature(path: str) -> OwnSignature:
     try:
         with open(path, "rb") as handle:
             data = handle.read()
-        blob = container.CompoundFile(data).stream(container.MSI_SIGNATURE_STREAM)
-    except (OSError, ValueError):
+    except OSError:
         return OwnSignature()
+    try:
+        blob = container.CompoundFile(data).stream(container.MSI_SIGNATURE_STREAM)
+    except ValueError:
+        blob = None
     if not blob:
         return OwnSignature()
     encoded = base64.b64encode(blob).decode("ascii")

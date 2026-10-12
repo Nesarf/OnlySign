@@ -245,13 +245,15 @@ opens, because tcl/tk having been bundled correctly is not something a build log
 checks run under both editions because .NET methods and module paths are not the same in both --
 the first version of this tool named one edition's paths as constants.
 
-One thing is known to be missing rather than merely undone:
+Nothing is known to be missing in what it reads. Both package formats it was thought to be unable
+to read turned out to be readable, and one of them for a simpler reason than expected:
 
-* a **CAB** keeps its signature in a reserved area of its own header rather than in a stream, and
-  that layout is not read here, so `own_signature` falls back to the Windows verdict for those --
-  which may be answering about a catalog. MSI used to be in this list. It is read from its container
-  now, and the thumbprint taken out of three packages signed here matches what the ledger recorded
-  at the time.
+* **MSI** keeps its signature as one stream among many inside a compound file, so that one did need a
+  reader -- `onlysign/engine/container.py`, checked against packages signed here.
+* **CAB** does not: measured on a cabinet signed with this tool, `cbCabinet` ends at byte 132 and the
+  PKCS#7 begins exactly there, appended the way a PE's certificate table is. The .NET call the engine
+  already used had been reading it all along, and a reader written for it was deleted after the
+  measurement showed it was looking in `abReserve`, which holds something else.
 
 A terminal cannot be tested by a script, so `tools/terminal-probe.ps1` exists for a person to run in
 each one. What the gate's output depends on is a short list -- whether stdout is a console, what it
