@@ -159,10 +159,9 @@ def _cmd_sign(args: argparse.Namespace) -> int:
     for line in workflow.describe_outcome(outcome):
         print(line)
 
-    if notice.interactive():
-        closing = phrases.table(getattr(args, "language", ""))
-        print()
-        print(closing.get("signing_failed" if outcome.failed else "bonfire", ""))
+    closing = phrases.table(getattr(args, "language", ""))
+    print()
+    print(closing.get("signing_failed" if outcome.failed else "bonfire", ""))
     return 1 if outcome.failed else 0
 
 
