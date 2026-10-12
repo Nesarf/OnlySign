@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -31,7 +32,7 @@ if str(ROOT) not in sys.path:
 
 from onlysign import notice as notice_module  # noqa: E402
 from onlysign.engine import (  # noqa: E402
-    audit, certs, discover, gate, ledger, pe, ps, signer, trust, workflow,
+    audit, certs, container, discover, gate, ledger, pe, ps, signer, trust, workflow,
 )
 
 PASSED = 0
@@ -584,6 +585,95 @@ def main() -> int:
     check("the notice is chosen by owner first, then by language",
           notice_prefers_a_local_file_and_the_asked_language)
     check("the notice is not printed into a pipe", notice_is_not_shown_to_a_pipe)
+
+
+    # --- reading a container -------------------------------------------------- #
+    print()
+    print("a signature inside a container")
+
+    def _tiny_cfb(payload: bytes, claimed_size: int | None = None) -> bytes:
+        """A compound file built by hand, all 6 KB of it.
+
+        Hand-built on purpose. The first version of this reader was pointed straight at a real signed
+        MSI, and a length field it had misread turned into an allocation of tens of gigabytes -- the
+        kind of bug a large input finds and a small one does not. A file this size cannot hurt
+        anything, and every field in it was written here, so the reader is checked against something
+        known rather than against whatever a real package happens to contain.
+        """
+        import struct
+        SECTOR = 512
+        FREE, END, FAT = 0xFFFFFFFF, 0xFFFFFFFE, 0xFFFFFFFD
+        header = bytearray(SECTOR)
+        header[0:8] = container.CFB_MAGIC
+        struct.pack_into("<H", header, 24, 0x003E)
+        struct.pack_into("<H", header, 26, 0x0003)
+        struct.pack_into("<H", header, 28, 0xFFFE)
+        struct.pack_into("<H", header, 30, 9)
+        struct.pack_into("<H", header, 32, 6)
+        struct.pack_into("<I", header, 44, 1)
+        struct.pack_into("<I", header, 48, 0)
+        struct.pack_into("<I", header, 56, 4096)
+        struct.pack_into("<I", header, 60, END)
+        struct.pack_into("<I", header, 68, END)
+        struct.pack_into("<I", header, 76, 1)
+        for index in range(1, 109):
+            struct.pack_into("<I", header, 76 + 4 * index, FREE)
+
+        directory = bytearray(SECTOR)
+
+        def entry(index: int, name: str, kind: int, start: int, size: int) -> None:
+            base = index * 128
+            raw = name.encode("utf-16-le") + bytes(2)
+            directory[base:base + len(raw)] = raw
+            struct.pack_into("<H", directory, base + 64, len(raw))
+            directory[base + 66] = kind
+            struct.pack_into("<I", directory, base + 116, start)
+            struct.pack_into("<Q", directory, base + 120, size)
+
+        entry(0, "Root Entry", 5, END, 0)
+        entry(1, container.MSI_SIGNATURE_STREAM, 2, 2,
+              len(payload) if claimed_size is None else claimed_size)
+
+        count = (len(payload) + SECTOR - 1) // SECTOR
+        values = [END, FAT] + [2 + i + 1 for i in range(count - 1)] + [END]
+        values += [FREE] * (128 - len(values))
+        fat = bytearray(SECTOR)
+        for index, value in enumerate(values):
+            struct.pack_into("<I", fat, 4 * index, value)
+        return bytes(header) + bytes(directory) + bytes(fat) + payload + bytes(SECTOR)
+
+    def container_reads_a_stream_it_was_given():
+        payload = bytes(range(256)) * 16
+        parsed = container.CompoundFile(_tiny_cfb(payload))
+        same(len(parsed.directory()), 4, "directory entries")
+        blob = parsed.stream(container.MSI_SIGNATURE_STREAM)
+        truthy(blob is not None, "the signature stream was not found")
+        same(len(blob), len(payload), "the length of the stream that came back")
+        truthy(blob == payload, "the bytes are not the ones that went in")
+        same(parsed.stream("no such stream"), None, "a stream that is not there")
+
+    def container_does_not_believe_a_claimed_length():
+        # The incident, as a test: a length field saying 2^62 must cost nothing. Bounding loop steps
+        # is not enough; without a bound on bytes this is where the process dies.
+        payload = bytes(range(256)) * 16
+        parsed = container.CompoundFile(_tiny_cfb(payload, claimed_size=1 << 62))
+        started = time.time()
+        blob = parsed.stream(container.MSI_SIGNATURE_STREAM)
+        elapsed = time.time() - started
+        truthy(elapsed < 5, f"reading a doctored length took {elapsed:.1f}s")
+        truthy(blob is None or len(blob) <= len(_tiny_cfb(payload, claimed_size=1 << 62)),
+               "a doctored length produced more bytes than the file holds")
+
+    def container_refuses_what_is_not_one():
+        try:
+            container.CompoundFile(b"not a compound file at all" + bytes(600))
+        except container.NotAContainer:
+            return
+        raise AssertionError("a file that is not a compound file was accepted")
+
+    check("a stream is read out of a compound file", container_reads_a_stream_it_was_given)
+    check("a claimed length is not believed", container_does_not_believe_a_claimed_length)
+    check("something that is not a container is refused", container_refuses_what_is_not_one)
 
     # --- cleaning up after itself --------------------------------------------- #
     if throwaway is not None:
