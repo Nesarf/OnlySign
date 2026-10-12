@@ -157,44 +157,41 @@ LIMITS = {
         "driver": WezTerm,
         "read": True,
         "write": True,
-        "how": "the CLI's spawn / get-text / send-text, against the mux the GUI provides",
+        "how": "the CLI's spawn / get-text / send-text, against the mux the GUI provides. All three "
+               "were exercised by hand against a real pane. The mux then declined to answer for "
+               "several attempts and the CLI hangs rather than failing when it cannot reach one, so "
+               "the wrapper around this is not yet trusted.",
     },
     "tabby": {
         "driver": None,
-        "read": False,
-        "write": False,
-        "how": "Electron. Nothing in the shipped CLI reads a pane or types into one, so it would "
-               "have to go through the remote debugging port and the renderer's own DOM, which is "
-               "a different piece of work with a different failure surface.",
+        "read": True,
+        "write": True,
+        "launch": True,
+        "how": "Electron, and both halves have a way in. Measured: started with "
+               "--remote-debugging-port=9222 it answers HTTP 200 with Chrome/150 and Electron/43, so "
+               "the renderer can be reached over the debugging protocol -- and since Tabby renders "
+               "with xterm.js the terminal content is JavaScript state rather than painted pixels, "
+               "which is exactly what can be asked for. Its own CLI also has `tabby run <command>`, "
+               "so starting something in it needs no window messages at all. Not written: the "
+               "protocol needs a WebSocket client, which the standard library does not carry.",
     },
     "windterm": {
         "driver": None,
         "read": False,
-        "write": False,
-        "how": "No scripting surface, and the terminal is drawn rather than built from controls, so "
-               "there is nothing for UI Automation to read. Typing into it would be possible by "
-               "sending window messages; reading it back would not.",
+        "write": True,
+        "how": "Qt, and it does expose accessibility -- measured: the main window carries 131 "
+               "elements, of which Text, Edit, Button and RadioButton all appear, and a dialog is "
+               "walkable. But the terminal is not among them. The 23 Custom elements are where it "
+               "is drawn, the longest text any element in that window carries is 18 characters, and "
+               "the rest are labels, a date and the session tree. So there is nothing to read back: "
+               "typing in would work by window message, and reading would mean photographing the "
+               "window and recognising the text.",
     },
     "bash": {
         "driver": None,
         "read": True,
         "write": True,
-        "how": "Already covered without a driver: the gate is run the same way a person runs it and "
-               "the output is the process's own stdout.",
+        "how": "Already covered without a driver: the gate is run the way a person runs it and the "
+               "output is the process's own stdout.",
     },
 }
-
-
-def find(name: str) -> tuple[str, str]:
-    """(executable, state directory) for a terminal, from where it is usually installed."""
-    if name == "wezterm":
-        exe = os.environ.get("WEZTERM_EXECUTABLE") or shutil.which("wezterm") or \
-            r"D:\DaShaoHuo\apps\WezTerm\wezterm.exe"
-        state = os.environ.get("WEZTERM_STATE_DIR") or os.path.join(
-            os.environ.get("USERPROFILE", ""), ".local", "share", "wezterm")
-        return exe, state
-    if name == "tabby":
-        return shutil.which("tabby") or r"C:\Program Files\Tabby\Tabby.exe", ""
-    if name == "windterm":
-        return shutil.which("WindTerm") or r"D:\DaShaoHuo\apps\WindTerm\WindTerm.exe", ""
-    return "", ""
