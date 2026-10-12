@@ -77,6 +77,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"note: {os.path.basename(extra)} is missing; the build will go without it")
     if args.no_icon:
         args.icon = ""
+    font_dir = os.path.join(ROOT, "mark", "fonts")
+    if os.path.isdir(font_dir):
+        # The typeface travels as data too, and is registered for this process only when it runs.
+        arguments += ["--add-data", font_dir + os.pathsep + os.path.join("mark", "fonts")]
     if args.icon:
         # Absolute, because PyInstaller resolves a relative icon path against the spec directory it
         # was handed -- which lives in the temp work area -- and not against where the build was

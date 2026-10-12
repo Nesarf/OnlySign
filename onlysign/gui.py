@@ -80,6 +80,63 @@ def make_dpi_aware() -> bool:
 make_dpi_aware()
 
 
+def use_bundled_fonts() -> list[str]:
+    """Make the fonts that travel with the tool available to this process, and say which loaded.
+
+    `AddFontResourceExW` with FR_PRIVATE registers a font file for this process only, so nothing is
+    installed on the machine and nothing is left behind when it exits. A console cannot choose a font
+    for one line -- that is why the gate's banner is letter-spacing and a frame -- but a window can,
+    and this is where the font that came with the tool becomes usable.
+
+    The fonts are data, so they travel beside the code; a missing one costs the typeface and never
+    the window.
+    """
+    if os.name != "nt":
+        return []
+    loaded: list[str] = []
+    roots = [os.path.dirname(os.path.dirname(os.path.abspath(__file__)))]
+    bundled = getattr(sys, "_MEIPASS", "")
+    if bundled:
+        roots.append(bundled)
+    if getattr(sys, "frozen", False):
+        roots.append(os.path.dirname(sys.executable))
+    try:
+        import ctypes
+        add = ctypes.windll.gdi32.AddFontResourceExW
+    except (AttributeError, OSError, ImportError):
+        return loaded
+    FR_PRIVATE = 0x10
+    for root in roots:
+        folder = os.path.join(root, "mark", "fonts")
+        if not os.path.isdir(folder):
+            continue
+        for name in sorted(os.listdir(folder)):
+            if not name.lower().endswith((".ttf", ".otf")):
+                continue
+            path = os.path.join(folder, name)
+            if add(ctypes.c_wchar_p(path), FR_PRIVATE, 0):
+                loaded.append(name)
+    return loaded
+
+
+FONTS_LOADED = use_bundled_fonts()
+
+# The face the tool's own wordmark is set in, when it came along. Trajan-style capitals are what the
+# line this echoes is set in; a console cannot be told to use it, a window can.
+WORDMARK_FONT = "Cinzel"
+
+
+def ascii_banner() -> str:
+    """The same words the gate answers a yes with, taken from the same table."""
+    from . import phrases
+    return phrases.table(i18n.DEFAULT_LANGUAGE)["bonfire"]
+
+
+def wordmark_font(size: int) -> tuple[str, int]:
+    return (WORDMARK_FONT if any("cinzel" in n.lower() for n in FONTS_LOADED)
+            else i18n.FONTS[i18n.DEFAULT_LANGUAGE]["latin"], size)
+
+
 def split_scripts(text: str) -> list[tuple[str, str]]:
     """Cut a string into runs of one script, so each run can be drawn in its own font.
 
@@ -650,6 +707,10 @@ class Window:
         mark = self._about_mark(body)
         if mark is not None:
             mark.pack(pady=(0, 8))
+        ttk.Label(body, text=self.t(i18n_key="app.name"),
+                  font=wordmark_font(i18n.FONT_SIZE + 8)).pack(anchor="w")
+        banner = ttk.Label(body, text=ascii_banner(), font=wordmark_font(i18n.FONT_SIZE + 2))
+        banner.pack(anchor="w", pady=(6, 10))
         scripted(body, self.t(i18n_key="about.purpose"), self.language,
                  justify="left").pack(anchor="w", pady=(0, 8))
         # The notice is a drawing made of characters, so it needs a fixed pitch to keep its shape --
