@@ -105,6 +105,11 @@ function Read-Utf8Text([string]$path) {
 # Every line this script says travels in a UTF-8 sidecar, keyed by name, because the script itself
 # has to stay ASCII. The English here is the fallback, so a missing sidecar costs the translation and
 # never the sentence.
+$transcript = Join-Path $here 'Install.transcript.txt'
+function Say([string]$text, [string]$colour = '') {
+    if ($colour) { Write-Host $text -ForegroundColor $colour } else { Write-Host $text }
+    try { Add-Content -LiteralPath $transcript -Value $text -Encoding UTF8 } catch { }
+}
 $phrases = @{}
 foreach ($line in (Read-Utf8Text (Join-Path $here '__PHRASES__')).Split([char]10)) {
     $trimmed = $line.Trim()
@@ -128,10 +133,10 @@ $notice = (Read-Utf8Text (Join-Path $here '__NOTICE__')).TrimEnd()
 $question = (Read-Utf8Text (Join-Path $here '__PROMPT__')).TrimEnd()
 if (-not $question) { $question = 'To proceed with installation? (Y/N)' }
 
-Write-Host ''
+Say ''
 if (-not (Test-Path -LiteralPath $artifact)) {
-    Write-Host (P 'incomplete' 'This package is incomplete: the file it installs is not beside this script.') -ForegroundColor Red
-    Write-Host ((P 'expected' '  expected: ') + $artifact)
+    Say (P 'incomplete' 'This package is incomplete: the file it installs is not beside this script.') -ForegroundColor Red
+    Say ((P 'expected' '  expected: ') + $artifact)
     exit 2
 }
 
@@ -147,81 +152,81 @@ try {
 $verdict = Get-AuthenticodeSignature -LiteralPath $artifact
 $stamped = [bool]$verdict.TimeStamperCertificate
 
-Write-Host ((P 'package' 'package : ') + $targetName)
-Write-Host ((P 'signer' 'signer  : ') + $(if ($carried) { $carried } else { (P 'signer_none' 'nothing -- the file carries no signature') }))
+Say ((P 'package' 'package : ') + $targetName)
+Say ((P 'signer' 'signer  : ') + $(if ($carried) { $carried } else { (P 'signer_none' 'nothing -- the file carries no signature') }))
 if ($carried) {
-    Write-Host (P 'carried_note' 'read from the file itself, so a catalog entry cannot answer for it')
-    Write-Host ((P 'stamped' 'stamped : ') + $(if ($stamped) { (P 'stamped_yes' 'yes') } else { (P 'stamped_no' 'no') }))
-    Write-Host ((P 'verdict' 'verdict : ') + $verdict.Status)
+    Say (P 'carried_note' 'read from the file itself, so a catalog entry cannot answer for it')
+    Say ((P 'stamped' 'stamped : ') + $(if ($stamped) { (P 'stamped_yes' 'yes') } else { (P 'stamped_no' 'no') }))
+    Say ((P 'verdict' 'verdict : ') + $verdict.Status)
     # Printed, and labelled, because it does not always answer about the line above. Get-AuthenticodeSignature
     # consults the machine's security catalogs, so a file whose own signature belongs to nobody
     # trusted can still come back Valid -- because a catalog says Microsoft signed it. That is not a
     # theoretical hazard: it is what this file did the first time the gate was run against it.
-    Write-Host (P 'verdict_note_a' '          what Windows says about this file, catalogs included.')
-    Write-Host (P 'verdict_note_b' '          It can answer about a different signature than the one above.')
+    Say (P 'verdict_note_a' '          what Windows says about this file, catalogs included.')
+    Say (P 'verdict_note_b' '          It can answer about a different signature than the one above.')
     if ($verdict.Status -ne 'Valid') {
-        Write-Host (P 'selfsigned_a' '          A self-signed certificate is its own root.')
-        Write-Host (P 'selfsigned_b' '          The check below does not depend on that.')
+        Say (P 'selfsigned_a' '          A self-signed certificate is its own root.')
+        Say (P 'selfsigned_b' '          The check below does not depend on that.')
     }
 }
-Write-Host ''
+Say ''
 
 if (-not $carried) {
-    Write-Host (P 'no_signature_a' 'This package carries no signature.') -ForegroundColor Red
-    Write-Host (P 'no_signature_b' 'Installation was not started.') -ForegroundColor Red
+    Say (P 'no_signature_a' 'This package carries no signature.') -ForegroundColor Red
+    Say (P 'no_signature_b' 'Installation was not started.') -ForegroundColor Red
     exit 1
 }
 if ($ExpectedThumbprint -and ($carried -ne $ExpectedThumbprint)) {
-    Write-Host (P 'wrong_a' 'This package is NOT signed by the identity it claims.') -ForegroundColor Red
-    Write-Host ((P 'wrong_expected' '  expected: ') + $ExpectedThumbprint)
-    Write-Host ((P 'wrong_found' '  found   : ') + $carried)
-    Write-Host (P 'wrong_b' 'Installation was not started.') -ForegroundColor Red
+    Say (P 'wrong_a' 'This package is NOT signed by the identity it claims.') -ForegroundColor Red
+    Say ((P 'wrong_expected' '  expected: ') + $ExpectedThumbprint)
+    Say ((P 'wrong_found' '  found   : ') + $carried)
+    Say (P 'wrong_b' 'Installation was not started.') -ForegroundColor Red
     exit 1
 }
 if ($ExpectedThumbprint -and -not $stamped) {
-    Write-Host (P 'no_timestamp_a' 'The signature carries no timestamp.') -ForegroundColor Yellow
-    Write-Host (P 'no_timestamp_b' 'Installation was not started.') -ForegroundColor Yellow
+    Say (P 'no_timestamp_a' 'The signature carries no timestamp.') -ForegroundColor Yellow
+    Say (P 'no_timestamp_b' 'Installation was not started.') -ForegroundColor Yellow
     exit 1
 }
 
 if ($notice) {
-    Write-Host $notice
+    Say $notice
 } else {
-    Write-Host ("This tool was developed by " + $Developer + ".")
+    Say ("This tool was developed by " + $Developer + ".")
 }
-Write-Host ''
+Say ''
 
 $answer = ''
 if ($args -contains '-Yes' -or $args -contains '--yes') {
     # The consent is still given by a person; it was given when they typed the flag.
     $answer = 'y'
-    Write-Host ($question + ' Y' + (P 'answered_cli' '   [answered on the command line]'))
+    Say ($question + ' Y' + (P 'answered_cli' '   [answered on the command line]'))
 } else {
     $tries = 0
     while ($tries -lt 10) {
-        Write-Host ($question + ' ') -NoNewline
+        Say ($question + ' ') -NoNewline
         $line = [Console]::In.ReadLine()
         if ($null -eq $line) { break }          # nobody is there to consent
         $answer = $line.Trim().ToLower()
         if ($answer -eq 'y' -or $answer -eq 'yes') { break }
         if ($answer -eq 'n' -or $answer -eq 'no') { break }
-        Write-Host (P 'answer_again' 'Please answer Y or N.')
+        Say (P 'answer_again' 'Please answer Y or N.')
         $answer = ''
         $tries++
     }
 }
 
 if ($answer -ne 'y' -and $answer -ne 'yes') {
-    Write-Host ''
-    Write-Host (P 'not_started' 'The door cannot be opened from this side.')
+    Say ''
+    Say (P 'not_started' 'The door cannot be opened from this side.')
     exit 0
 }
 
-Write-Host ''
-Write-Host ''
-Write-Host (P 'bonfire' '  B O N F I R E   L I T')
-Write-Host ''
-Write-Host (P 'starting' 'Starting the installer...')
+Say ''
+Say ''
+Say (P 'bonfire' '  B O N F I R E   L I T')
+Say ''
+Say (P 'starting' 'Starting the installer...')
 Start-Process -FilePath $artifact
 exit 0
 """
