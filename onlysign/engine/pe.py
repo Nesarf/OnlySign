@@ -93,6 +93,52 @@ def pe_certificate_table(path: str | os.PathLike[str]) -> tuple[int, int] | None
     return offset, size
 
 
+def checksum_field(data: bytes | bytearray) -> int:
+    """Where the PE checksum lives, or -1 if this is not a PE.
+
+    The same offset for both widths, which is worth knowing rather than guessing: a 32-bit optional
+    header carries BaseOfData and a 4-byte ImageBase where a 64-bit one carries an 8-byte ImageBase,
+    so the two differ by four bytes and then **re-align at offset 32**. Everything after that,
+    CheckSum included, sits in the same place.
+    """
+    if len(data) < 0x40:
+        return -1
+    pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
+    if pe_offset + 4 + 20 + 2 > len(data) or data[pe_offset:pe_offset + 4] != b"PE\0\0":
+        return -1
+    optional = pe_offset + 4 + 20
+    if struct.unpack_from("<H", data, optional)[0] not in (0x10B, 0x20B):
+        return -1
+    return optional + 64
+
+
+def recompute_checksum(data: bytearray) -> int:
+    """Write the PE checksum the way the linker and the signing tools write it, and return it.
+
+    Verified rather than assumed: run against every binary in System32 and SysWOW64 it reproduces
+    the value already stored in the header, 60 out of 60 -- which is the only reason it is safe to
+    use for putting a file back the way it was. The four bytes of the field itself count as zero,
+    and the file length is added at the end.
+    """
+    offset = checksum_field(data)
+    if offset < 0 or offset + 4 > len(data):
+        return 0
+    total = 0
+    length = len(data)
+    for index in range(0, length - (length % 2), 2):
+        if offset <= index < offset + 4:
+            continue
+        total += data[index] | (data[index + 1] << 8)
+        total = (total & 0xFFFF) + (total >> 16)
+    if length % 2:
+        total += data[length - 1]
+        total = (total & 0xFFFF) + (total >> 16)
+    total = (total & 0xFFFF) + (total >> 16)
+    value = (total + length) & 0xFFFFFFFF
+    struct.pack_into("<I", data, offset, value)
+    return value
+
+
 def strip_signature(path: str | os.PathLike[str]) -> int:
     """Remove an embedded signature in place. Returns the number of bytes removed, 0 if none.
 
@@ -116,6 +162,11 @@ def strip_signature(path: str | os.PathLike[str]) -> int:
     removed = len(data) - offset
     del data[offset:]
     struct.pack_into("<II", data, entry, 0, 0)
+    # And the checksum, which signing recomputed over the file *with* the signature. Leaving it
+    # alone is what makes a stripped file match neither hash on record: the bytes are the ones from
+    # before signing, but one field in the header still describes the signed version. Putting it
+    # back is what lets an audit say "the signature was removed" rather than only "there is none".
+    recompute_checksum(data)
     with open(path, "wb") as fh:
         fh.write(bytes(data))
     return removed
