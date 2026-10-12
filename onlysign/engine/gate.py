@@ -44,11 +44,29 @@ NOTICE_FILE = "NOTICE.txt"
 TARGET_FILE = "Install.target"
 SCRIPT_FILE = "Install.ps1"
 COMMAND_FILE = "Install.cmd"
+SHELL_FILE = "Install.sh"
 PROMPT_FILE = "Install.prompt.txt"
 PHRASE_FILE = "Install.phrases.txt"
 
 # The question itself lives in notice.PROMPTS, in every language the tool speaks, and is written
 # beside the notice as UTF-8 rather than into the script.
+
+
+# The same gate for anybody whose shell is not cmd. A .cmd cannot be run by bash at all, and
+# MSYS2, WSL, Tabby, WezTerm and Windows Terminal all hand the job to a shell that is not cmd --
+# so the door has to exist in a form those can open. ASCII, like the script it calls, and it does
+# nothing except find the PowerShell and hand it the same file the .cmd does.
+_SHELL = """#!/bin/sh
+# The gate that travels with this package, for sh-compatible shells.
+here=$(dirname "$0")
+for ps in powershell.exe pwsh.exe; do
+    if command -v "$ps" >/dev/null 2>&1; then
+        exec "$ps" -NoProfile -ExecutionPolicy Bypass -File "$here/{script}" "$@"
+    fi
+done
+echo "This package needs PowerShell, and neither powershell.exe nor pwsh.exe was found." >&2
+exit 1
+"""
 
 _COMMAND = """@echo off
 rem The gate that travels with this package. Double-click it, or run it in a console.
@@ -213,6 +231,7 @@ class Gate:
     def paths(self) -> dict[str, str]:
         return {
             "command": os.path.join(self.directory, COMMAND_FILE),
+            "shell": os.path.join(self.directory, SHELL_FILE),
             "script": os.path.join(self.directory, SCRIPT_FILE),
             "target": os.path.join(self.directory, TARGET_FILE),
             "notice": os.path.join(self.directory, NOTICE_FILE),
@@ -258,15 +277,20 @@ def emit(artifact: str, *, thumbprint: str, directory: str = "", developer: str 
               .replace("__PROMPT__", PROMPT_FILE)
               .replace("__PHRASES__", PHRASE_FILE))
     command = _COMMAND.replace("{script}", SCRIPT_FILE)
+    shell_script = _SHELL.replace("{script}", SCRIPT_FILE)
 
     _check_ascii(script, SCRIPT_FILE)
     _check_ascii(command, COMMAND_FILE)
+    _check_ascii(shell_script, SHELL_FILE)
 
     paths = gate.paths()
     with open(paths["script"], "w", encoding="utf-8", newline="\r\n") as handle:
         handle.write(script)
     with open(paths["command"], "w", encoding="ascii", newline="\r\n") as handle:
         handle.write(command)
+    # LF, because sh reads this one and a CR would end up inside the interpreter name.
+    with open(paths["shell"], "w", encoding="ascii", newline=chr(10)) as handle:
+        handle.write(shell_script)
     # The name travels in UTF-8, so a package called 修改器-安装程序.exe is not a problem for a
     # script that has to stay ASCII.
     with open(paths["target"], "w", encoding="utf-8", newline="\n") as handle:
