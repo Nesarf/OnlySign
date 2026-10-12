@@ -281,6 +281,19 @@ found" while working under PowerShell 7 -- a difference between the two editions
 the both-editions row above exists to catch, and it had not been caught because the failure came back
 as "this package carries no signature" rather than as an error.
 
+Attribution on an MSI was measured rather than assumed, and the answer is that the signed carrier is
+already there. A package's certificate subject is inside what its signature covers, so `O=` in the
+subject is a claim the signature vouches for -- stronger than any field the installer's own tables
+hold, and it needs no code. The other candidate is the summary information stream, which is what
+Explorer's Details pane shows; it does exist (`\u0005SummaryInformation`) and the platform's own API
+writes it, but two things were measured about it. It has no spare room -- the declared section size
+exactly fills the stream on every package looked at -- so writing to it is a container rewrite, not a
+patch. And the string it stores went through the machine's ANSI code page: on a code page 1252 machine
+`(c)` stores as `A9`, on the 936 machine this was measured on it cannot be encoded at all and came
+back as `7F`, while `\u4e2d` round-tripped untouched. So whether a `(c)` survives in that field is a
+property of the machine, not of this tool, which is why the mark's own ASCII form is the one to place
+there -- and why placing it belongs before signing, like every other mark.
+
 A terminal cannot be tested by a script, so `tools/terminal-probe.ps1` exists for a person to run in
 each one. What the gate's output depends on is a short list -- whether stdout is a console, what it
 is encoded as, how wide the window is -- and nothing in the tool branches on which terminal it is in.
