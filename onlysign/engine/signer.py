@@ -24,6 +24,7 @@ and a signature with no timestamp is treated as a failure rather than as a signa
 
 from __future__ import annotations
 
+import base64
 import os
 import shutil
 import subprocess
@@ -168,10 +169,59 @@ def windows_verdict(path: str | os.PathLike[str]) -> Verdict:
     )
 
 
+def _container_signature(path: str) -> OwnSignature:
+    NL = chr(10)
+    """The signature a package carries inside itself, read from the file rather than from Windows.
+
+    An MSI keeps its signature as one stream among many in a compound file, and the .NET call that
+    reads a PE's signature does not know how to find it -- so before this, an MSI reported that it
+    carried no signature at all, and the only answer left was the machine's verdict, which consults
+    security catalogs and can therefore be answering about somebody else's signature. Reading the
+    PKCS#7 out of the container removes that: the answer stops depending on what this machine has
+    been told to trust.
+    """
+    from . import container
+    try:
+        with open(path, "rb") as handle:
+            data = handle.read()
+        blob = container.CompoundFile(data).stream(container.MSI_SIGNATURE_STREAM)
+    except (OSError, ValueError):
+        return OwnSignature()
+    if not blob:
+        return OwnSignature()
+    encoded = base64.b64encode(blob).decode("ascii")
+    script = (
+        "$bytes = [Convert]::FromBase64String('" + encoded + "')" + NL
+        + "$cms = New-Object System.Security.Cryptography.Pkcs.SignedCms" + NL
+        + "$cms.Decode($bytes)" + NL
+        + "$info = $cms.SignerInfos[0]" + NL
+        + "$cert = $info.Certificate" + NL
+        + "$stamped = ($info.CounterSignerInfos.Count -gt 0)" + NL
+        + "foreach ($attr in $info.UnsignedAttributes) {" + NL
+        + "  $oid = $attr.Oid.Value" + NL
+        + "  if ($oid -eq '1.3.6.1.4.1.311.3.3.1' -or $oid -eq '1.2.840.113549.1.9.6') { $stamped = $true }" + NL
+        + "}" + NL
+        + "[pscustomobject]@{ thumbprint = $cert.GetCertHashString(); subject = $cert.Subject; "
+        + "issuer = $cert.Issuer; timestamped = [bool]$stamped }"
+    )
+    row = ps.one(script, timeout=60.0) or {}
+    thumbprint = str(row.get("thumbprint") or "")
+    if not thumbprint:
+        return OwnSignature()
+    return OwnSignature(present=True, thumbprint=thumbprint,
+                        subject=str(row.get("subject") or ""),
+                        issuer=str(row.get("issuer") or ""),
+                        timestamped=bool(row.get("timestamped")))
+
+
 def own_signature(path: str | os.PathLike[str]) -> OwnSignature:
     """The signature the file carries, or an empty one when it carries none."""
     if not os.path.isfile(path):
         return OwnSignature()
+    if pe.identify(path) == pe.KIND_MSI:
+        found = _container_signature(str(path))
+        if found.present:
+            return found
     row = ps.one(_own_body(str(path)), timeout=60.0) or {}
     thumbprint = str(row.get("thumbprint") or "")
     if not thumbprint:
