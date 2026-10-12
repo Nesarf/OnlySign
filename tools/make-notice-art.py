@@ -45,6 +45,14 @@ DENSITY_RAMP = " .:-=+*#%@"
 # grid would suggest. Getting this wrong is what makes a drawing look vertically squashed.
 DEFAULT_CELL_ASPECT = 2.0
 
+# Named recipes, so a size that looked right once can be asked for by name instead of remembered.
+# `packed` is the shape of an art that was drawn by another tool and handed over ready-made: a
+# taller cell than a terminal really has, which reads as a slightly condensed mark.
+PRESETS = {
+    "terminal": {"cell_aspect": 2.0},
+    "packed": {"cell_aspect": 2.46},
+}
+
 
 def _coverage(source: str, cols: int, rows: int, resample) -> np.ndarray:
     """The mark's ink, averaged into a grid twice as tall as the requested character rows."""
@@ -94,6 +102,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cols-only", type=int, default=0,
                         help="give a width and let the height follow the mark's own aspect, "
                              "which is what a notice wants: width is what must fit")
+    parser.add_argument("--preset", default="", choices=("",) + tuple(PRESETS),
+                        help="a named cell shape: terminal (2.0) or packed (2.46)")
     parser.add_argument("--cell-aspect", type=float, default=DEFAULT_CELL_ASPECT,
                         help="height over width of one character cell; 2.0 for the usual terminal")
     parser.add_argument("--filter", default="box", choices=tuple(FILTERS),
@@ -101,6 +111,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--threshold", type=float, default=0.5,
                         help="coverage above which a cell counts as ink")
     args = parser.parse_args(argv)
+
+    if args.preset:
+        args.cell_aspect = PRESETS[args.preset]["cell_aspect"]
 
     cols, rows = args.cols, args.rows
     if args.cols_only:

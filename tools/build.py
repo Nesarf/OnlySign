@@ -66,11 +66,15 @@ def main(argv: list[str] | None = None) -> int:
     arguments.append("--console" if args.console else "--windowed")
     # The notice travels inside the build. Its mark is content, not code, so it is a data file --
     # and a packaged tool that could not introduce itself would be a worse tool than the checkout.
-    notice_file = os.path.join(ROOT, "NOTICE.txt")
-    if os.path.isfile(notice_file):
-        arguments += ["--add-data", notice_file + os.pathsep + "."]
-    else:
-        print("note: NOTICE.txt is missing, so the build will carry the notice without its mark")
+    for extra in (os.path.join(ROOT, "NOTICE.txt"),
+                  os.path.join(ROOT, "mark", "onlysign-256.png")):
+        if os.path.isfile(extra):
+            # The notice's text, and the mark the About window shows in colour. Both are content,
+            # so both travel as data rather than being written into the code.
+            arguments += ["--add-data", extra + os.pathsep + os.path.relpath(os.path.dirname(extra), ROOT)
+                          if extra.endswith(".png") else extra + os.pathsep + "."]
+        else:
+            print(f"note: {os.path.basename(extra)} is missing; the build will go without it")
     if args.no_icon:
         args.icon = ""
     if args.icon:

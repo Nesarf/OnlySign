@@ -29,6 +29,7 @@ import argparse
 import json
 import os
 import queue
+import sys
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -610,6 +611,35 @@ class Window:
 
     # --- about ---------------------------------------------------------------- #
 
+    def _about_mark(self, parent):
+        """The application's own mark, in colour.
+
+        A console cannot show this -- the notice's drawing is characters, one colour, because that is
+        what a console has -- but a window can, so the one place the real image appears is here. If
+        the file is not beside the build the heading simply has no picture; a missing decoration is
+        not a reason for the window to fail.
+        """
+        roots = [os.path.dirname(os.path.dirname(os.path.abspath(__file__)))]
+        bundled = getattr(sys, "_MEIPASS", "")
+        if bundled:
+            roots.append(bundled)
+        if getattr(sys, "frozen", False):
+            roots.append(os.path.dirname(sys.executable))
+        for root in roots:
+            for name in ("onlysign-256.png", "onlysign.png"):
+                path = os.path.join(root, "mark", name)
+                if not os.path.isfile(path):
+                    continue
+                try:
+                    # Tk 8.6 and later read PNG directly, so no imaging library is needed for this.
+                    image = tk.PhotoImage(file=path)
+                except tk.TclError:
+                    continue
+                label = ttk.Label(parent, image=image)
+                label.image = image          # Tk holds only a weak reference; keep one here
+                return label
+        return None
+
     def on_about(self) -> None:
         from . import notice
         dialog = tk.Toplevel(self.root)
@@ -617,6 +647,9 @@ class Window:
         dialog.transient(self.root)
         body = ttk.Frame(dialog, padding=12)
         body.pack(fill="both", expand=True)
+        mark = self._about_mark(body)
+        if mark is not None:
+            mark.pack(pady=(0, 8))
         scripted(body, self.t(i18n_key="about.purpose"), self.language,
                  justify="left").pack(anchor="w", pady=(0, 8))
         # The notice is a drawing made of characters, so it needs a fixed pitch to keep its shape --
@@ -872,13 +905,18 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     window = Window(root, settings)
     if args.check:
-        # Prove the window in every language it claims to speak, not just the one it opens in.
+        # Prove the window in every language it claims to speak, not just the one it opens in, and
+        # prove the About window can find its mark -- a picture that silently goes missing in a
+        # packaged build is not something a build log ever mentions.
         for code in i18n.LANGUAGES:
             window._apply_language(code)
             root.update_idletasks()
         root.update_idletasks()
+        mark = window._about_mark(root)
+        picture = (f"{mark.image.width()}x{mark.image.height()}" if mark is not None
+                   else "absent, and the About window goes without it")
         root.destroy()
-        print("the window was built, switched language twice, and closed")
+        print(f"the window was built, switched language twice, and closed; mark {picture}")
         return 0
     root.mainloop()
     return 0
