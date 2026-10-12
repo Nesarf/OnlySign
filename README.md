@@ -34,7 +34,7 @@ From a checkout, without building anything:
 ```powershell
 python -m onlysign.gui                          # the window
 python OnlySign.py                              # the same window, through the packaged entry point
-python -m onlysign selftest                     # run the engine against itself: 44 checks
+python -m onlysign selftest                     # run the engine against itself: 45 checks
 python -m onlysign selftest --keep              # leave the scratch directory behind to look at
 python tools/gui_smoke.py                       # drive the window the way a person would: 6 checks
 
@@ -225,7 +225,7 @@ onlysign/engine/bootmark.py  a mark in 512 bytes, for the machines that cannot v
 onlysign/mark.py             the mark line, and the carriers the verb puts it in
 onlysign/gui.py              the window; layout and a worker thread, nothing else
 onlysign/cli.py              the engine with a keyboard instead of a window
-onlysign/selftest.py         44 checks of the engine, in a scratch directory
+onlysign/selftest.py         45 checks of the engine, in a scratch directory
 tools/build.py               building the one-file executable
 tools/gui_smoke.py           6 checks that drive the window itself
 tools/cfb-probe.py           what a compound file's header says, against what the reader returned
@@ -340,9 +340,9 @@ Built and checked at every level:
 
 | what | how it is checked |
 |---|---|
-| the engine | `python -m onlysign selftest` -- 44 checks, in a scratch directory |
+| the engine | `python -m onlysign selftest` -- 45 checks, in a scratch directory |
 | the window | `python tools/gui_smoke.py` -- 6 checks that open it and press its buttons |
-| both PowerShell editions | the same 44 checks under Windows PowerShell and under PowerShell 7 |
+| both PowerShell editions | the same 45 checks under Windows PowerShell and under PowerShell 7 |
 | the executable | about 13 MB, one file: lists certificates, answers `scan --help`, opens its window |
 | reading a container | `python tools/cfb-probe.py <dir>` -- every compound file in it, against its own header |
 

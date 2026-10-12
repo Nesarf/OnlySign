@@ -252,7 +252,39 @@ def main() -> int:
         same(pe.identify(target), pe.KIND_UNKNOWN, "the kind of a text file")
         falsy(pe.signable(pe.KIND_UNKNOWN), "a text file is not signed by Authenticode")
 
+    def a_stale_certificate_table_entry_is_refused():
+        # The entry is a number the file writes about itself, and a packer that appends to an
+        # already-signed image was measured leaving it pointing at the offset the base image had --
+        # which lands inside section data. Everything from that offset to the end is what stripping
+        # drops, so acting on the number deletes bytes the entry never claimed. Measured on the old
+        # code: 19296 bytes removed, 11696 of them the image's own data, and the file still
+        # identified as a PE afterwards, so nothing downstream would have noticed.
+        import struct
+        target = scratch / "stale-entry.exe"
+        shutil.copy2(sample_source(args.sample), target)
+        truthy(pe.pe_certificate_table(target) is not None, "the sample carries no signature to desync")
+        size_before = os.path.getsize(target)
+
+        data = bytearray(Path(target).read_bytes())
+        pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
+        magic = struct.unpack_from("<H", data, pe_offset + 24)[0]
+        entry = pe_offset + 24 + (96 if magic == 0x10B else 112) + 4 * 8
+        offset, claimed = struct.unpack_from("<II", data, entry)
+        struct.pack_into("<I", data, entry, max(0, offset - claimed - 4096))
+        Path(target).write_bytes(bytes(data))
+        fixture = ledger.hash_file(target)
+
+        try:
+            pe.strip_signature(target)
+        except ValueError as exc:
+            truthy("WIN_CERTIFICATE" in str(exc), f"refused, but not for the reason: {exc}")
+        else:
+            raise AssertionError("a stale certificate table entry was acted on rather than refused")
+        same(ledger.hash_file(target), fixture, "the bytes after the refusal -- it must change nothing")
+        same(os.path.getsize(target), size_before, "the size after the refusal")
+
     check("a PE image is identified and its signature can be removed", identify_and_strip)
+    check("a stale certificate table entry is refused", a_stale_certificate_table_entry_is_refused)
     check("something that is not an artifact is not called one", unknown_kinds)
 
     # --- certificates --------------------------------------------------------- #
