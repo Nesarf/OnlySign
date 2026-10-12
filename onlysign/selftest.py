@@ -121,9 +121,15 @@ def main() -> int:
         # a version 7 Microsoft.PowerShell.Security that version 5.1 cannot load.
         seen = ps.one("$env:PSModulePath")
         parts = [part for part in str(seen).split(";") if part]
-        truthy(ps.OWN_MODULES in parts, f"this edition's module directory is not in [{seen}]")
-        foreign = [part for part in parts if "\\7\\Modules" in part or "/7/Modules" in part]
-        same(foreign, [], "module directories belonging to another PowerShell edition")
+        if "WindowsPowerShell" in ps.POWERSHELL:
+            truthy(ps.OWN_MODULES in parts, f"this edition's module directory is not in [{seen}]")
+            foreign = [part for part in parts if "\\7\\Modules" in part or "/7/Modules" in part]
+            same(foreign, [], "module directories belonging to another PowerShell edition")
+        else:
+            # The other way round for PowerShell 7: its default path deliberately includes the Windows
+            # PowerShell directories, and that is where it finds the modules it does not ship.
+            truthy(any("WindowsPowerShell" in part for part in parts),
+                   f"PowerShell 7 cannot see the Windows PowerShell modules: [{seen}]")
 
     def the_command_exists():
         # The whole tool rests on one command. Asking for it is the direct test, and it is the thing
@@ -253,7 +259,7 @@ def main() -> int:
 
     def hardened_key():
         script = (
-            "$acl = (Get-Item -LiteralPath " + ps.literal(str(pfx)) + " -Force).GetAccessControl()\n"
+            "$acl = Get-Acl -LiteralPath " + ps.literal(str(pfx)) + "\n"
             "$names = @($acl.Access | ForEach-Object { $_.IdentityReference.Value })\n"
             "[pscustomobject]@{ count = $names.Count; names = $names }"
         )

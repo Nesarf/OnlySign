@@ -230,7 +230,11 @@ def harden(path: str | os.PathLike[str]) -> str:
     script = r"""
 $target = """ + ps.literal(path) + r"""
 $item = Get-Item -LiteralPath $target -Force
-$acl = $item.GetAccessControl()
+# The cmdlets, not the .NET methods. FileInfo.GetAccessControl() exists only in the runtime that
+# Windows PowerShell runs on; PowerShell 7 runs a newer one where it is an extension method that has
+# to be asked for by name, so the call simply fails and the key cannot be locked down at all.
+# Get-Acl and Set-Acl are the same two operations and both editions have them.
+$acl = Get-Acl -LiteralPath $target
 $acl.SetAccessRuleProtection($true, $false)
 foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRule($rule) }
 $me = [Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -242,7 +246,7 @@ foreach ($who in @($me, 'BUILTIN\Administrators', 'NT AUTHORITY\SYSTEM')) {
   } catch { }
 }
 if ($added -eq 0) { throw 'refusing to write an access list with no entries in it' }
-$item.SetAccessControl($acl)
+Set-Acl -LiteralPath $target -AclObject $acl
 $added
 """
     ps.one(script, timeout=60.0)
