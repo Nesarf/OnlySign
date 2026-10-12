@@ -230,6 +230,47 @@ tools/cfb-probe.py           what a compound file's header says, against what th
 dist/                        built executables (not committed)
 ```
 
+## A mark, and where it does not belong
+
+Two verbs, and they are not the same one. **Signing** is what a platform gives you: a PE certificate
+table, an MSI stream, a CAB's appended blob. It needs cryptography and something to trust.
+**Marking** is the other one: text placed where it will still be later, needing no cryptography at
+all. `onlysign/mark.py` carries it, and the line it writes is
+
+    ONLYSIGN-MARK v1 | (c) PRIMARY [SECONDARY] | sha256:… | kind:hash-record
+
+Square brackets rather than a dash: a secondary is a connotation of the primary, not a peer of it.
+`kind:` says how strong the mark is, because a mark does not make a file trustworthy and this does
+not pretend otherwise. And a mark goes on **before** signing, never after — changing a file's bytes
+is what stops every signature over them from verifying, so a mark added afterwards turns a signed
+artifact into a broken one.
+
+That boundary is why an MSI is not a candidate. Two things were measured before deciding it, and
+they point the same way.
+
+The first is that attribution on an MSI is already carried by something stronger. A package's
+certificate subject is inside what its signature covers, so the `O=` in it is a claim the signature
+vouches for — read back from signed packages, and it needs no code.
+
+The second is what the other candidate would cost. The summary information stream is the field
+Explorer's Details pane shows, and the platform's own API writes it, but it has no spare room (the
+declared section size equalled the available bytes on every package looked at), and the string it
+stores goes through the machine's ANSI code page: on a code page 1252 machine `(c)` stores as `A9`,
+while on the 936 machine this was measured on it cannot be encoded at all and came back as `7F`,
+even though `\u4e2d` round-tripped untouched. Whether a mark survives there is a property of the
+machine rather than of this tool.
+
+So an MSI is signed, not marked, and the mark module exists for the formats that have nowhere to
+sign — ZIP today, and whatever else that turns out to be. The MSI equivalent of the PE version
+resource is the build's business, not the signer's: the build states the attribution and the signer
+vouches for it, which is the same division of labour that puts `company` and `trademarks` into an
+executable before anything signs it. For an MSI that means the summary information at build time,
+where the code page is known and the package is still the builder's to write.
+
+**It is not wired in yet.** `onlysign/mark.py` has no caller and the command line does not offer it,
+so the ZIP comment carrier is written and untested against a real artifact. That is a gap and is
+recorded as one rather than described as a feature.
+
 ## Status
 
 Built and checked at every level:
