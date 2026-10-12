@@ -15,6 +15,8 @@ great deal behind that nobody wants to see in a source tree.
 from __future__ import annotations
 
 import argparse
+import json
+from pathlib import Path
 import os
 import subprocess
 import sys
@@ -22,6 +24,93 @@ import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENTRY = os.path.join(ROOT, "OnlySign.py")
+
+
+DEFAULT_IDENTITY = {
+    "product": "OnlySign",
+    "version": "1.0.0",
+    "company": "its publisher",
+    "copyright": "(c) its publisher",
+    "trademarks": "",
+    "description": "Signs files, and ships a gate that checks the signature before installing.",
+}
+
+
+def identity_from(path: str) -> dict:
+    """The names to stamp, from a local file, never from this repository.
+
+    The tool is published neutral: nothing in it says whose it is. A build that belongs to
+    somebody loads that somewhere else -- a JSON file with `primary`, optional `secondary` marks,
+    and the product details. Without one, the generic wording above is used, which is the same
+    choice NOTICE.txt already makes.
+
+    The secondary marks are written to LegalTrademarks rather than appended to the copyright
+    line, because a secondary mark is a mark and the copyright line is a claim of ownership over
+    the work. Keeping them in separate fields keeps the relation visible instead of flattening it
+    into a list.
+    """
+    if not path:
+        return dict(DEFAULT_IDENTITY)
+    try:
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"could not read the identity file {path}: {exc}") from None
+    merged = dict(DEFAULT_IDENTITY)
+    primary = str(raw.get("primary", "")).strip()
+    if primary:
+        merged["company"] = primary
+        merged["copyright"] = "(c) " + primary
+    secondary = [str(s).strip() for s in raw.get("secondary", []) if str(s).strip()]
+    if secondary:
+        merged["trademarks"] = "  ".join(secondary)
+    for key in ("product", "version", "description"):
+        if raw.get(key):
+            merged[key] = str(raw[key])
+    return merged
+
+
+def write_version_file(identity: dict, target: str) -> str:
+    """Write the VSVersionInfo that PyInstaller reads with --version-file.
+
+    Every value goes in through json.dumps, which yields an ASCII-safe quoted literal -- so a
+    name with a quote, a backslash or a character outside ASCII cannot break the file it is
+    being written into.
+    """
+    ver = identity["version"]
+    parts = [int(n) for n in (ver.split(".") + ["0", "0", "0", "0"])[:4] if n.isdigit()] or [1, 0, 0, 0]
+    while len(parts) < 4:
+        parts.append(0)
+    quad = "(" + ", ".join(str(n) for n in parts) + ")"
+    fields = [
+        ("CompanyName", identity["company"]),
+        ("FileDescription", identity["description"]),
+        ("FileVersion", ver),
+        ("LegalCopyright", identity["copyright"]),
+        ("LegalTrademarks", identity["trademarks"]),
+        ("OriginalFilename", os.path.basename(target)),
+        ("ProductName", identity["product"]),
+        ("ProductVersion", ver),
+    ]
+    rows = ("," + chr(10)).join("            StringStruct(%s, %s)" % (json.dumps(k), json.dumps(v))
+                        for k, v in fields)
+    NL = chr(10)
+    text = (
+        "VSVersionInfo(" + NL
+        + "  ffi=FixedFileInfo(filevers=" + quad + ", prodvers=" + quad + "," + NL
+        + "                    mask=0x3f, flags=0x0, OS=0x40004, fileType=0x1, subtype=0x0," + NL
+        + "                    date=(0, 0))," + NL
+        + "  kids=[" + NL
+        + "    StringFileInfo([StringTable('040904B0', [" + NL
+        + rows + NL
+        + "        ])])," + NL
+        + "    VarFileInfo([VarStruct('Translation', [1033, 1200])])" + NL
+        + "  ]" + NL
+        + ")" + NL
+    )
+    out = Path(target)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text, encoding="ascii")
+    return str(out)
 
 
 def pyinstaller_version(python: str) -> str:
@@ -46,6 +135,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="the .ico to use; the one in mark/ by default")
     parser.add_argument("--no-icon", action="store_true", help="build without an icon")
     parser.add_argument("--name", default="OnlySign")
+    parser.add_argument(
+        "--identity", default="",
+        help="a local JSON file naming who the build belongs to; without one the build "
+             "stays generic, as the published tool is")
     parser.add_argument("--out", default=os.path.join(ROOT, "dist"),
                         help="where the built executable goes; made absolute before use")
     parser.add_argument("--keep-work", action="store_true")
@@ -81,6 +174,12 @@ def main(argv: list[str] | None = None) -> int:
     if os.path.isdir(font_dir):
         # The typeface travels as data too, and is registered for this process only when it runs.
         arguments += ["--add-data", font_dir + os.pathsep + os.path.join("mark", "fonts")]
+    identity = identity_from(args.identity or os.path.join(ROOT, "IDENTITY.local.json"))
+    version_file = write_version_file(identity, os.path.join(ROOT, "build", "version_info.txt"))
+    arguments += ["--version-file", version_file]
+    # The copyright belongs in the file, not only beside it: somebody who opens the properties of
+    # the executable should see whose work it is without having to find a notice next to it.
+    print(f"  version resource: company={identity['company']!r} trademarks={identity['trademarks']!r}")
     if args.icon:
         # Absolute, because PyInstaller resolves a relative icon path against the spec directory it
         # was handed -- which lives in the temp work area -- and not against where the build was
