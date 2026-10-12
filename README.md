@@ -34,7 +34,7 @@ From a checkout, without building anything:
 ```powershell
 python -m onlysign.gui                          # the window
 python OnlySign.py                              # the same window, through the packaged entry point
-python -m onlysign selftest                     # run the engine against itself: 25 checks
+python -m onlysign selftest                     # run the engine against itself: 36 checks
 python -m onlysign selftest --keep              # leave the scratch directory behind to look at
 python tools/gui_smoke.py                       # drive the window the way a person would: 6 checks
 
@@ -223,7 +223,7 @@ onlysign/engine/trust.py     the two stores, and the difference between them
 onlysign/engine/workflow.py  the order of operations, which is where the rules live
 onlysign/gui.py              the window; layout and a worker thread, nothing else
 onlysign/cli.py              the engine with a keyboard instead of a window
-onlysign/selftest.py         25 checks of the engine, in a scratch directory
+onlysign/selftest.py         36 checks of the engine, in a scratch directory
 tools/build.py               building the one-file executable
 tools/gui_smoke.py           6 checks that drive the window itself
 dist/                        built executables (not committed)
@@ -235,20 +235,24 @@ Built and checked at every level:
 
 | what | how it is checked |
 |---|---|
-| the engine | `python -m onlysign selftest` -- 25 checks, in a scratch directory |
+| the engine | `python -m onlysign selftest` -- 36 checks, in a scratch directory |
 | the window | `python tools/gui_smoke.py` -- 6 checks that open it and press its buttons |
+| both PowerShell editions | the same 36 checks under Windows PowerShell and under PowerShell 7 |
 | the executable | about 13 MB, one file: lists certificates, answers `scan --help`, opens its window |
 
-The third row is verified rather than assumed: the packaged build was run, and its window opens
-(tcl/tk having been bundled correctly is not something a build log tells you).
+The last two rows are verified rather than assumed. The packaged build was run and its window
+opens, because tcl/tk having been bundled correctly is not something a build log tells you. The
+checks run under both editions because .NET methods and module paths are not the same in both --
+the first version of this tool named one edition's paths as constants.
 
-Two things are known to be missing rather than merely undone:
+One thing is known to be missing rather than merely undone:
 
-* the audit's `now unsigned` verdict is decided by the signature's absence, because removing a
-  signature does **not** restore a file to its pre-signing bytes -- signing rewrites the PE checksum
-  and stripping the table does not put it back, so a stripped file matches neither recorded hash.
-  That is reported honestly, but a tool that restored the checksum would make the two comparable;
-* for the package formats (MSI, CAB) the signature lives inside a container this tool does not parse,
-  so `own_signature` falls back to the Windows verdict there -- which may be answering about a
-  catalog. Recorded as a limitation rather than dressed up as a fact.
+* a **CAB** keeps its signature in a reserved area of its own header rather than in a stream, and
+  that layout is not read here, so `own_signature` falls back to the Windows verdict for those --
+  which may be answering about a catalog. MSI used to be in this list. It is read from its container
+  now, and the thumbprint taken out of three packages signed here matches what the ledger recorded
+  at the time.
 
+A terminal cannot be tested by a script, so `tools/terminal-probe.ps1` exists for a person to run in
+each one. What the gate's output depends on is a short list -- whether stdout is a console, what it
+is encoded as, how wide the window is -- and nothing in the tool branches on which terminal it is in.
