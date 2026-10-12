@@ -597,25 +597,35 @@ def main() -> int:
     print()
     print("a signature inside a container")
 
-    def _tiny_cfb(payload: bytes, claimed_size: int | None = None) -> bytes:
-        """A compound file built by hand, all 6 KB of it.
+    def _tiny_cfb(payload: bytes, claimed_size: int | None = None, sector: int = 512,
+                  directory_loop: bool = False) -> bytes:
+        """A compound file built by hand, a few KB of it.
 
         Hand-built on purpose. The first version of this reader was pointed straight at a real signed
         MSI, and a length field it had misread turned into an allocation of tens of gigabytes -- the
         kind of bug a large input finds and a small one does not. A file this size cannot hurt
         anything, and every field in it was written here, so the reader is checked against something
         known rather than against whatever a real package happens to contain.
+
+        Built at more than one sector size because the arithmetic that finds a sector only agrees
+        between them when the sector is 512 bytes. A reader tested at 512 alone passed while reading
+        every 4096-byte package wrongly -- it took a wrong stride into the middle of the allocation
+        table, followed a table that described something else, and reported entries that were never
+        in the file. One size would have kept hiding that, so both are built and both are read.
         """
         import struct
-        SECTOR = 512
+        SECTOR = sector
         FREE, END, FAT = 0xFFFFFFFF, 0xFFFFFFFE, 0xFFFFFFFD
         header = bytearray(SECTOR)
         header[0:8] = container.CFB_MAGIC
         struct.pack_into("<H", header, 24, 0x003E)
-        struct.pack_into("<H", header, 26, 0x0003)
+        # Version 4 is the one that uses 4096-byte sectors, and it is also the version whose header
+        # states the directory's sector count instead of leaving it to the chain.
+        struct.pack_into("<H", header, 26, 0x0004 if SECTOR > 512 else 0x0003)
         struct.pack_into("<H", header, 28, 0xFFFE)
-        struct.pack_into("<H", header, 30, 9)
+        struct.pack_into("<H", header, 30, SECTOR.bit_length() - 1)
         struct.pack_into("<H", header, 32, 6)
+        struct.pack_into("<I", header, 40, 1 if SECTOR > 512 else 0)
         struct.pack_into("<I", header, 44, 1)
         struct.pack_into("<I", header, 48, 0)
         struct.pack_into("<I", header, 56, 4096)
@@ -641,8 +651,12 @@ def main() -> int:
               len(payload) if claimed_size is None else claimed_size)
 
         count = (len(payload) + SECTOR - 1) // SECTOR
-        values = [END, FAT] + [2 + i + 1 for i in range(count - 1)] + [END]
-        values += [FREE] * (128 - len(values))
+        # The first entry describes sector 0, which holds the directory; the second describes sector
+        # 1, which holds this table. A loop here is what a wrong stride looked like from inside the
+        # reader: sector 0 pointing back at itself, walked until a byte cap rather than until an end.
+        values = [0 if directory_loop else END, FAT]
+        values += [2 + i + 1 for i in range(count - 1)] + [END]
+        values += [FREE] * (SECTOR // 4 - len(values))
         fat = bytearray(SECTOR)
         for index, value in enumerate(values):
             struct.pack_into("<I", fat, 4 * index, value)
@@ -650,13 +664,34 @@ def main() -> int:
 
     def container_reads_a_stream_it_was_given():
         payload = bytes(range(256)) * 16
-        parsed = container.CompoundFile(_tiny_cfb(payload))
-        same(len(parsed.directory()), 4, "directory entries")
-        blob = parsed.stream(container.MSI_SIGNATURE_STREAM)
-        truthy(blob is not None, "the signature stream was not found")
-        same(len(blob), len(payload), "the length of the stream that came back")
-        truthy(blob == payload, "the bytes are not the ones that went in")
-        same(parsed.stream("no such stream"), None, "a stream that is not there")
+        for sector in (512, 4096):
+            parsed = container.CompoundFile(_tiny_cfb(payload, sector=sector))
+            same(parsed.sector_size, sector, "the sector size the reader took from the header")
+            # Every slot in the directory is an entry, filled or not, and a sector holds one slot
+            # per 128 bytes -- so this number is also the check that no more than the declared
+            # number of directory sectors was read.
+            same(len(parsed.directory()), sector // 128,
+                 f"directory entries in a {sector}-byte-sector file")
+            blob = parsed.stream(container.MSI_SIGNATURE_STREAM)
+            truthy(blob is not None, f"the signature stream was not found at {sector}-byte sectors")
+            same(len(blob), len(payload), "the length of the stream that came back")
+            truthy(blob == payload, "the bytes are not the ones that went in")
+            same(parsed.stream("no such stream"), None, "a stream that is not there")
+
+    def container_does_not_follow_a_chain_that_loops():
+        # The shape of the real failure, made small: a directory chain pointing back at its own
+        # first sector. A bound on steps does not catch it, because walking to the bound is exactly
+        # what a loop does -- the entries beyond the structure parse as entries that were never
+        # written, and a 1.2 MB package came back with 64 MB of them.
+        payload = bytes(range(256)) * 16
+        parsed = container.CompoundFile(_tiny_cfb(payload, directory_loop=True))
+        try:
+            entries = parsed.directory()
+        except container.NotAContainer:
+            return
+        raise AssertionError(
+            f"a directory chain that revisits its own first sector produced {len(entries)} entries"
+        )
 
     def container_does_not_believe_a_claimed_length():
         # The incident, as a test: a length field saying 2^62 must cost nothing. Bounding loop steps
@@ -677,8 +712,10 @@ def main() -> int:
             return
         raise AssertionError("a file that is not a compound file was accepted")
 
-    check("a stream is read out of a compound file", container_reads_a_stream_it_was_given)
+    check("a stream is read out of a compound file at either sector size",
+          container_reads_a_stream_it_was_given)
     check("a claimed length is not believed", container_does_not_believe_a_claimed_length)
+    check("a directory chain that loops is refused", container_does_not_follow_a_chain_that_loops)
     check("something that is not a container is refused", container_refuses_what_is_not_one)
 
     # --- cleaning up after itself --------------------------------------------- #

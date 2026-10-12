@@ -34,7 +34,7 @@ From a checkout, without building anything:
 ```powershell
 python -m onlysign.gui                          # the window
 python OnlySign.py                              # the same window, through the packaged entry point
-python -m onlysign selftest                     # run the engine against itself: 36 checks
+python -m onlysign selftest                     # run the engine against itself: 37 checks
 python -m onlysign selftest --keep              # leave the scratch directory behind to look at
 python tools/gui_smoke.py                       # drive the window the way a person would: 6 checks
 
@@ -223,9 +223,10 @@ onlysign/engine/trust.py     the two stores, and the difference between them
 onlysign/engine/workflow.py  the order of operations, which is where the rules live
 onlysign/gui.py              the window; layout and a worker thread, nothing else
 onlysign/cli.py              the engine with a keyboard instead of a window
-onlysign/selftest.py         36 checks of the engine, in a scratch directory
+onlysign/selftest.py         37 checks of the engine, in a scratch directory
 tools/build.py               building the one-file executable
 tools/gui_smoke.py           6 checks that drive the window itself
+tools/cfb-probe.py           what a compound file's header says, against what the reader returned
 dist/                        built executables (not committed)
 ```
 
@@ -235,10 +236,11 @@ Built and checked at every level:
 
 | what | how it is checked |
 |---|---|
-| the engine | `python -m onlysign selftest` -- 36 checks, in a scratch directory |
+| the engine | `python -m onlysign selftest` -- 37 checks, in a scratch directory |
 | the window | `python tools/gui_smoke.py` -- 6 checks that open it and press its buttons |
-| both PowerShell editions | the same 36 checks under Windows PowerShell and under PowerShell 7 |
+| both PowerShell editions | the same 37 checks under Windows PowerShell and under PowerShell 7 |
 | the executable | about 13 MB, one file: lists certificates, answers `scan --help`, opens its window |
+| reading a container | `python tools/cfb-probe.py <dir>` -- every compound file in it, against its own header |
 
 The last two rows are verified rather than assumed. The packaged build was run and its window
 opens, because tcl/tk having been bundled correctly is not something a build log tells you. The
@@ -254,6 +256,30 @@ to read turned out to be readable, and one of them for a simpler reason than exp
   PKCS#7 begins exactly there, appended the way a PE's certificate table is. The .NET call the engine
   already used had been reading it all along, and a reader written for it was deleted after the
   measurement showed it was looking in `abReserve`, which holds something else.
+
+What the compound-file reader got wrong is worth recording, because it was wrong in a way that a
+passing test suite could not see. Sectors were found at `512 + index * sector_size`. Sector 0 begins
+after the header, so the offset is `(index + 1) * sector_size` -- and those two expressions are the
+same arithmetic whenever a sector is 512 bytes. Every file it was tried on was one, including the
+hand-built fixture in the self-test. On a 4096-byte-sector package the offset landed 3584 bytes early,
+inside the allocation table rather than at the directory, so the reader followed a table describing
+something else, walked a chain that was never the directory's, and parsed the sectors it reached as
+directory entries. A 1.2 MB package returned 64 MB of entries -- bounded by a byte cap, so it did not
+die, and the real entries were among them, so lookups still mostly worked. Measured afterwards across
+931 compound files in the Windows installer cache: 371 of the 382 that carry a signature use 4096-byte
+sectors, which is to say the embedded signature of nearly every one of them was being missed and the
+question was being handed to Windows instead -- and a machine's answer comes from its security
+catalogs, which is the ambiguity the reader exists to remove. Two further changes came out of it: a
+chain that revisits a sector is now refused rather than walked to a cap, and the directory walk is
+bounded by the sector count the header states instead of by a byte ceiling. The self-test builds its
+fixture at both sector sizes, and it was confirmed to fail against the old arithmetic before being
+kept -- a regression test that has not been seen to fail is a guess.
+
+Reading an MSI's signature also needed `Add-Type -AssemblyName System.Security`. Windows PowerShell
+does not resolve `SignedCms` without it, so on that edition the whole path failed with "type not
+found" while working under PowerShell 7 -- a difference between the two editions of exactly the kind
+the both-editions row above exists to catch, and it had not been caught because the failure came back
+as "this package carries no signature" rather than as an error.
 
 A terminal cannot be tested by a script, so `tools/terminal-probe.ps1` exists for a person to run in
 each one. What the gate's output depends on is a short list -- whether stdout is a console, what it

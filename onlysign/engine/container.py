@@ -69,6 +69,10 @@ class CompoundFile:
         if self.sector_size not in (512, 4096) or not 0 < self.mini_sector_size <= self.sector_size:
             raise NotAContainer(f"implausible sector sizes ({self.sector_size}/{self.mini_sector_size})")
         self.fat_sector_count = _u32(data, 44)
+        # How many sectors the directory occupies, as the file itself states it. Version 3 files
+        # leave this zero and the size has to come from the chain; version 4 files state it, and
+        # believing the statement is what keeps a chain walk from leaving the directory behind.
+        self.directory_sector_count = _u32(data, 40)
         self.directory_start = _u32(data, 48)
         self.mini_cutoff = _u32(data, 56)
         self.mini_fat_start = _u32(data, 60)
@@ -84,10 +88,24 @@ class CompoundFile:
         return max(0, min(int(size), len(self.data), MAX_STREAM_BYTES))
 
     def sector(self, index: int) -> bytes:
-        start = 512 + index * self.sector_size
+        # Sector 0 starts *after* the header, so the offset is (index + 1) sectors in. Writing this
+        # as a constant 512 plus index times the sector size is the same arithmetic whenever sectors
+        # are 512 bytes -- which is why it survived every 512-byte file it was tested on -- and is
+        # 3584 bytes wrong on a 4096-byte one. That offset landed inside the FAT instead of the
+        # directory, so the "FAT" was FAT bytes read at a wrong stride, the directory chain walked
+        # a table that described something else, and a 1.2 MB package handed back 64 MB of entries
+        # that were never in it. A file's own numbers being off by one sector is not detectable from
+        # the numbers; it is detectable from the structure they describe, and the header of a FAT
+        # names itself with SECTOR_FAT at index 0.
+        start = (index + 1) * self.sector_size
         if index < 0 or start + self.sector_size > len(self.data):
             raise NotAContainer(f"sector {index} is outside the file")
         return self.data[start:start + self.sector_size]
+
+    @property
+    def total_sectors(self) -> int:
+        """How many whole sectors this file has, which is the one bound a chain cannot exceed."""
+        return max(0, len(self.data) // self.sector_size - 1)
 
     def _difat(self) -> list[int]:
         """The list of sectors holding the FAT: 109 in the header, then however many it chains to."""
@@ -124,11 +142,21 @@ class CompoundFile:
         return entries
 
     def _chain(self, start: int, limit: int = MAX_SECTORS):
-        """Follow a FAT chain. A corrupt file must not turn into an infinite loop."""
+        """Follow a FAT chain, refusing one that revisits a sector.
+
+        A bound on the number of steps says how long a walk may be, not whether it means anything: a
+        table that loops walks to the bound and hands back bytes from sectors the structure never
+        owned. Revisiting a sector is something a correct chain never does, so it is the condition
+        worth testing. A chain that leaves the file is caught by `sector` instead.
+        """
         table = self.fat()
         current = start
         steps = 0
+        seen: set[int] = set()
         while current < SECTOR_SPECIAL and steps < limit:
+            if current in seen:
+                raise NotAContainer(f"allocation chain revisits sector {current}")
+            seen.add(current)
             yield current
             if current >= len(table):
                 return
@@ -148,7 +176,11 @@ class CompoundFile:
         out = bytearray()
         current = start
         steps = 0
+        seen: set[int] = set()
         while current < SECTOR_SPECIAL and steps < MAX_SECTORS and len(out) < size:
+            if current in seen:
+                raise NotAContainer(f"allocation chain revisits sector {current}")
+            seen.add(current)
             if mini:
                 begin = current * block_size
                 out += root[begin:begin + block_size]
@@ -177,8 +209,16 @@ class CompoundFile:
         """(size, first sector) for every stream entry, in directory order."""
         if getattr(self, "_directory_cache", None) is not None:
             return self._directory_cache
+        # The header states how many sectors the directory occupies, and that statement is the only
+        # thing here that says where the directory *ends*. Walking the chain until a byte cap instead
+        # is what let a 1.2 MB package produce 64 MB of entries: the walk kept going through sectors
+        # the directory never owned and parsed all of them as entries. The number still comes out of
+        # the file, so it is clamped to the file rather than trusted.
+        declared = min(self.directory_sector_count, self.total_sectors)
         raw = bytearray()
-        for sector_index in self._chain(self.directory_start):
+        for step, sector_index in enumerate(self._chain(self.directory_start)):
+            if declared and step >= declared:
+                break
             if len(raw) >= MAX_TABLE_BYTES:
                 break
             raw += self.sector(sector_index)

@@ -194,7 +194,12 @@ def _container_signature(path: str) -> OwnSignature:
         return OwnSignature()
     encoded = base64.b64encode(blob).decode("ascii")
     script = (
-        "$bytes = [Convert]::FromBase64String('" + encoded + "')" + NL
+        # Windows PowerShell does not resolve SignedCms without being told to load the assembly that
+        # carries it, so asking for a package's own signature failed on 5.1 with "type not found"
+        # while working on 7. The load is allowed to fail rather than abort, because the editions
+        # differ in whether the name resolves at all and 7 does not need it.
+        "try { Add-Type -AssemblyName System.Security -ErrorAction Stop } catch { }" + NL
+        + "$bytes = [Convert]::FromBase64String('" + encoded + "')" + NL
         + "$cms = New-Object System.Security.Cryptography.Pkcs.SignedCms" + NL
         + "$cms.Decode($bytes)" + NL
         + "$info = $cms.SignerInfos[0]" + NL
