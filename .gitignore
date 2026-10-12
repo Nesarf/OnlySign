@@ -22,3 +22,6 @@ onlysign-selftest-*/
 # their real one here instead: it is read first, and it stays out of what gets published.
 NOTICE.local*.txt
 
+
+# The names a build belongs to: theirs, never the published tool.
+IDENTITY.local.json
