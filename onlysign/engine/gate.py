@@ -111,7 +111,11 @@ foreach ($line in (Read-Utf8Text (Join-Path $here '__PHRASES__')).Split([char]10
     if (-not $trimmed) { continue }
     $cut = $trimmed.IndexOf('=')
     if ($cut -lt 1) { continue }
-    $phrases[$trimmed.Substring(0, $cut).Trim()] = $trimmed.Substring($cut + 1).Trim()
+    $value = $trimmed.Substring($cut + 1).Trim()
+    # A newline inside a value travels as two visible characters, because the file is one key
+    # per line; it becomes a real newline here. The backslash is built from its code point so
+    # this script never has to spell an escape of its own.
+    $phrases[$trimmed.Substring(0, $cut).Trim()] = $value.Replace([string][char]92 + 'n', [string][char]10)
 }
 function P([string]$key, [string]$fallback) {
     if ($phrases.ContainsKey($key)) { return $phrases[$key] }
@@ -213,6 +217,9 @@ if ($answer -ne 'y' -and $answer -ne 'yes') {
     exit 0
 }
 
+Write-Host ''
+Write-Host ''
+Write-Host (P 'bonfire' '  B O N F I R E   L I T')
 Write-Host ''
 Write-Host (P 'starting' 'Starting the installer...')
 Start-Process -FilePath $artifact

@@ -92,6 +92,19 @@ PHRASES: dict[str, dict[str, str]] = {
     "not_started": {"en": "The installation cannot be carried out at this moment.",
                     "zh": "安装不能在这一刻进行。",
                     "ja": "インストールは今この時点では行えません。"},
+    # The reply to yes. The game sets those two words in spaced capitals on a dark field; a console
+    # has no font to choose, but it has tracking and it has a frame, and between them that is most of
+    # what the line is. ASCII only, so it survives any code page -- a banner that arrives as question
+    # marks is worse than no banner.
+    "bonfire": {"en": "+-------------------------+\n"
+                      "|  B O N F I R E   L I T  |\n"
+                      "+-------------------------+",
+                "zh": "+-------------------------+\n"
+                      "|  B O N F I R E   L I T  |\n"
+                      "+-------------------------+",
+                "ja": "+-------------------------+\n"
+                      "|  B O N F I R E   L I T  |\n"
+                      "+-------------------------+"},
     "starting": {"en": "Starting the installer...", "zh": "正在启动安装程序…",
                  "ja": "取り付けを始めます…"},
     "answered_cli": {"en": "   [answered on the command line]", "zh": "   [已在命令行上作答]",
@@ -106,7 +119,15 @@ def table(language: str) -> dict[str, str]:
     return {key: entry.get(language) or entry.get("en", "") for key, entry in PHRASES.items()}
 
 
+# A newline inside a value, written as the two characters a reader of the sidecar can see. The format
+# is one key per line, which a value of several lines would break; escaping it keeps the file
+# readable by a person and still lets a banner be a banner. The backslash is built rather than typed,
+# so this file never carries an escape sequence of its own -- that mistake has cost enough today.
+NEWLINE_ESCAPE = chr(92) + "n"
+
+
 def sidecar(language: str) -> str:
     """The ``key = value`` text the gate writes and its script reads back."""
-    lines = [f"{key} = {value}" for key, value in table(language).items() if value]
+    lines = [f"{key} = {value}".replace("\n", NEWLINE_ESCAPE)
+             for key, value in table(language).items() if value]
     return "\n".join(lines) + "\n"
