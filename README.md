@@ -291,6 +291,20 @@ stops the sector after exactly one character and looks like success.
 Of the two checks, the one that does not need an emulator runs everywhere, and the one that does
 reports **not tested** when Unicorn is absent, which is the outcome that mechanism exists for.
 
+The firmware half is confirmed separately, because Unicorn has no BIOS and cannot confirm it. QEMU
+loaded the image as a floppy, handed the sector control, and the mark came back down the serial line
+exactly as the sector wrote it -- QEMU 11.1.0, and the identity's own names rather than the test's.
+That run is `tools/boot-check.py`, which builds the image and boots it:
+
+```
+python tools/boot-check.py --identity IDENTITY.local.json
+```
+
+It is a script rather than a thirtieth-something check for the same reason `terminal-probe.ps1` is:
+it needs something a normal run does not have, and a suite that quietly skips checks on a machine
+without QEMU would be worse than one that does not make the claim. QEMU is optional; the suite's
+coverage does not change with it.
+
 ## Status
 
 Built and checked at every level:
