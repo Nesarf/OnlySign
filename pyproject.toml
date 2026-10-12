@@ -1,0 +1,20 @@
+[project]
+name = "onlysign"
+version = "0.1.0"
+description = "Sign local build artifacts, and be able to say later what was signed."
+readme = "README.md"
+requires-python = ">=3.10"
+# Empty on purpose, and it should stay that way: the tool is meant to run on a machine that has
+# nothing installed. tkinter, hashlib, json and ctypes all ship with Python, and the signing itself
+# goes through the Windows PowerShell that ships with Windows.
+dependencies = []
+
+[project.scripts]
+onlysign-selftest = "onlysign.selftest:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["onlysign", "onlysign.engine"]

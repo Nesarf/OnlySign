@@ -1,0 +1,207 @@
+"""What a file actually is, and what a signature physically is.
+
+The extension is a claim; the first bytes are the file. A tool that puts a signature on something
+should say what it is about to sign before it signs it, and it should not be told by a name that
+anyone can change.
+
+The second half of this module is the part that makes signatures less mysterious: an Authenticode
+signature on a PE file is a table appended after everything else, found through one directory entry
+in the optional header. Removing it means clearing that entry and truncating the file where the
+table began. That is also why "sign last" is not a preference -- any later rewrite of the contents
+lands before the table or moves it, and the signature stops matching.
+"""
+
+from __future__ import annotations
+
+import os
+import struct
+from dataclasses import dataclass
+
+KIND_PE = "pe"
+KIND_MSI = "msi"
+KIND_CAB = "cab"
+KIND_DER = "der"
+KIND_UNKNOWN = "unknown"
+
+# What Windows will accept an embedded Authenticode signature on. A DER file is most likely a
+# catalog, which Authenticode does cover, but this tool has not exercised that path -- so it is
+# reported and left unselected rather than promised.
+SIGNED_BY_AUTHENTICODE = frozenset({KIND_PE, KIND_MSI, KIND_CAB})
+
+_MAGIC = (
+    (b"MZ", KIND_PE),
+    (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", KIND_MSI),   # OLE compound file
+    (b"MSCF", KIND_CAB),
+)
+
+_DESCRIPTION = {
+    KIND_PE: "a PE image (an executable or a library)",
+    KIND_MSI: "an MSI package",
+    KIND_CAB: "a cabinet",
+    KIND_DER: "a DER/PKCS#7 file, which is usually a catalog",
+    KIND_UNKNOWN: "not a file type this tool recognises",
+}
+
+
+def identify(path: str | os.PathLike[str]) -> str:
+    """The kind of file this is, decided by its leading bytes."""
+    with open(path, "rb") as fh:
+        head = fh.read(8)
+    for magic, kind in _MAGIC:
+        if head.startswith(magic):
+            return kind
+    if len(head) >= 2 and head[0] == 0x30 and head[1] in (0x80, 0x81, 0x82):
+        return KIND_DER
+    return KIND_UNKNOWN
+
+
+def describe(kind: str) -> str:
+    return _DESCRIPTION.get(kind, _DESCRIPTION[KIND_UNKNOWN])
+
+
+def signable(kind: str) -> bool:
+    return kind in SIGNED_BY_AUTHENTICODE
+
+
+def pe_certificate_table(path: str | os.PathLike[str]) -> tuple[int, int] | None:
+    """``(offset, size)`` of the embedded signature, or None when there is none.
+
+    The entry is index 4 (``IMAGE_DIRECTORY_ENTRY_SECURITY``) of the data directory, which sits at
+    offset 96 in a PE32 optional header and 112 in a PE32+ one, eight bytes per entry.
+    """
+    with open(path, "rb") as fh:
+        data = fh.read()
+    if len(data) < 0x40 or data[:2] != b"MZ":
+        return None
+    pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
+    if pe_offset <= 0 or pe_offset + 24 >= len(data) or data[pe_offset:pe_offset + 4] != b"PE\0\0":
+        return None
+    optional = pe_offset + 24
+    magic = struct.unpack_from("<H", data, optional)[0]
+    if magic == 0x10B:
+        directory = optional + 96
+    elif magic == 0x20B:
+        directory = optional + 112
+    else:
+        return None
+    entry = directory + 4 * 8
+    if entry + 8 > len(data):
+        return None
+    offset, size = struct.unpack_from("<II", data, entry)
+    if not size or not offset:
+        return None
+    return offset, size
+
+
+def strip_signature(path: str | os.PathLike[str]) -> int:
+    """Remove an embedded signature in place. Returns the number of bytes removed, 0 if none.
+
+    Written rather than borrowed: ``signtool remove`` refuses some Microsoft binaries outright and,
+    on a catalog-signed one, exits reporting success having removed nothing at all. Doing it here
+    also makes plain what the operation is -- clearing one entry and dropping a table off the end.
+    """
+    table = pe_certificate_table(path)
+    if table is None:
+        return 0
+    offset, _size = table
+    with open(path, "rb") as fh:
+        data = bytearray(fh.read())
+    if offset >= len(data):
+        raise ValueError(f"{path}: the certificate table points past the end of the file")
+    pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
+    optional = pe_offset + 24
+    magic = struct.unpack_from("<H", data, optional)[0]
+    directory = optional + (96 if magic == 0x10B else 112)
+    entry = directory + 4 * 8
+    removed = len(data) - offset
+    del data[offset:]
+    struct.pack_into("<II", data, entry, 0, 0)
+    with open(path, "wb") as fh:
+        fh.write(bytes(data))
+    return removed
+
+
+# DER-encoded object identifiers that appear inside a signed table when the signature was stamped:
+# 1.2.840.113549.1.9.16.2.14 (an RFC 3161 signature timestamp) and 1.2.840.113549.1.9.6 (the older
+# counter-signature). Searching for these is a byte-level question with a byte-level answer, which is
+# the point: the alternative is a verdict that can be about a catalog entry instead of this file.
+_TIMESTAMP_OIDS = (
+    bytes.fromhex("2a864886f70d010910020e"),
+    bytes.fromhex("2a864886f70d010906"),
+)
+
+
+def signature_blob(path: str | os.PathLike[str]) -> bytes | None:
+    """The bytes of the embedded signature table, or None when there is none."""
+    table = pe_certificate_table(path)
+    if table is None:
+        return None
+    offset, size = table
+    with open(path, "rb") as fh:
+        fh.seek(offset)
+        return fh.read(size)
+
+
+def has_timestamp_attribute(path: str | os.PathLike[str]) -> bool:
+    """Whether the file's own signature was stamped by a timestamp authority."""
+    blob = signature_blob(path)
+    if not blob:
+        return False
+    return any(oid in blob for oid in _TIMESTAMP_OIDS)
+
+
+@dataclass
+class SignatureState:
+    """Everything a signing attempt can change about a file, so it can be put back.
+
+    Measured rather than assumed: when the timestamp authority cannot be reached,
+    ``Set-AuthenticodeSignature`` appends a complete signature and *does not* take it back -- unlike
+    ``signtool``, which restores the file. What changes is exactly three things: the length, the
+    four-byte PE checksum, and the eight-byte certificate-table entry. The body is untouched.
+    """
+
+    size: int
+    checksum_offset: int
+    checksum: bytes
+    entry_offset: int
+    entry: bytes
+
+
+def capture_state(path: str | os.PathLike[str]) -> SignatureState | None:
+    """What would have to be restored if a signing attempt did not finish. None for a non-PE file."""
+    with open(path, "rb") as fh:
+        data = fh.read()
+    if len(data) < 0x40 or data[:2] != b"MZ":
+        return None
+    pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
+    if pe_offset <= 0 or pe_offset + 24 >= len(data) or data[pe_offset:pe_offset + 4] != b"PE\0\0":
+        return None
+    optional = pe_offset + 24
+    magic = struct.unpack_from("<H", data, optional)[0]
+    if magic not in (0x10B, 0x20B):
+        return None
+    directory = optional + (96 if magic == 0x10B else 112)
+    entry = directory + 4 * 8
+    checksum = optional + 64
+    if entry + 8 > len(data) or checksum + 4 > len(data):
+        return None
+    return SignatureState(
+        size=len(data),
+        checksum_offset=checksum,
+        checksum=data[checksum:checksum + 4],
+        entry_offset=entry,
+        entry=data[entry:entry + 8],
+    )
+
+
+def restore_state(path: str | os.PathLike[str], state: SignatureState) -> int:
+    """Put a file back the way it was, and report how many bytes were dropped off the end."""
+    with open(path, "rb") as fh:
+        data = bytearray(fh.read())
+    dropped = max(0, len(data) - state.size)
+    del data[state.size:]
+    data[state.checksum_offset:state.checksum_offset + 4] = state.checksum
+    data[state.entry_offset:state.entry_offset + 8] = state.entry
+    with open(path, "wb") as fh:
+        fh.write(bytes(data))
+    return dropped

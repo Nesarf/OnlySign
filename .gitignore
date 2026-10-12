@@ -1,0 +1,24 @@
+# Nothing here is built to be committed; the artifacts that have been signed are not source.
+signed/
+build/
+dist/
+*.spec
+
+__pycache__/
+*.py[cod]
+
+# Key material, in whatever form it appears. The engine hands out a public half (a .cer) on
+# purpose, so that one is a decision to make rather than a default to inherit.
+*.pfx
+*.p12
+
+# Scratch from a self-test run that was kept.
+onlysign-selftest-*/
+
+# The window's own settings: about one machine, not about the tool, and they name paths.
+.onlysign/
+
+# A notice of one's own. The repository ships a notice that belongs to nobody, and anyone may keep
+# their real one here instead: it is read first, and it stays out of what gets published.
+NOTICE.local*.txt
+
