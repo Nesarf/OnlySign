@@ -34,7 +34,7 @@ From a checkout, without building anything:
 ```powershell
 python -m onlysign.gui                          # the window
 python OnlySign.py                              # the same window, through the packaged entry point
-python -m onlysign selftest                     # run the engine against itself: 37 checks
+python -m onlysign selftest                     # run the engine against itself: 38 checks
 python -m onlysign selftest --keep              # leave the scratch directory behind to look at
 python tools/gui_smoke.py                       # drive the window the way a person would: 6 checks
 
@@ -223,7 +223,7 @@ onlysign/engine/trust.py     the two stores, and the difference between them
 onlysign/engine/workflow.py  the order of operations, which is where the rules live
 onlysign/gui.py              the window; layout and a worker thread, nothing else
 onlysign/cli.py              the engine with a keyboard instead of a window
-onlysign/selftest.py         37 checks of the engine, in a scratch directory
+onlysign/selftest.py         38 checks of the engine, in a scratch directory
 tools/build.py               building the one-file executable
 tools/gui_smoke.py           6 checks that drive the window itself
 tools/cfb-probe.py           what a compound file's header says, against what the reader returned
@@ -236,11 +236,33 @@ Built and checked at every level:
 
 | what | how it is checked |
 |---|---|
-| the engine | `python -m onlysign selftest` -- 37 checks, in a scratch directory |
+| the engine | `python -m onlysign selftest` -- 38 checks, in a scratch directory |
 | the window | `python tools/gui_smoke.py` -- 6 checks that open it and press its buttons |
-| both PowerShell editions | the same 37 checks under Windows PowerShell and under PowerShell 7 |
+| both PowerShell editions | the same 38 checks under Windows PowerShell and under PowerShell 7 |
 | the executable | about 13 MB, one file: lists certificates, answers `scan --help`, opens its window |
 | reading a container | `python tools/cfb-probe.py <dir>` -- every compound file in it, against its own header |
+
+Three of the 38 need a timestamp authority, which is the only part of this toolchain that is not on
+this machine, so they can report a fourth outcome: **not tested**. A run that reached everything says
+`38 check(s) passed, 0 failed`; a run that could not says so in those words and names the three. This
+exists because of what the alternative cost: the first version asserted that the *first* authority
+answered, so one flaky answer from `timestamp.digicert.com` was reported as `signing did not
+succeed`, and the check after it -- which needs a signed file to refuse a second signature on -- then
+reported `signing an already signed file was allowed`, because the rollback had left it nothing to
+refuse. Both read as defects in the tool. Neither was. What the tool does when no authority answers
+is checked with no network at all, by `a timestamp failure leaves the file untouched and unsigned`.
+
+That flake turned out to be hiding a real defect underneath it, which is why it was worth chasing
+rather than retrying. An authority that *answers* without timestamping the signature was treated
+differently from one that does not answer: the first ended the list and failed the signing, the
+second passed to the next authority. The list exists so that one authority failing is survivable, so
+that first behaviour threw away two working authorities because a third misbehaved. It now rolls that
+attempt back -- safe, because the rollback is byte-exact, and signing on top of the signature just
+left would append a second one -- and passes to the next. The rule is `signer.attempt_outcome`,
+pulled out of the loop so it can be checked directly: the state that matters, an authority that
+answers without timestamping, could not be produced on demand here, because a refused connection and
+a refusal in the timestamp protocol both end the attempt before anything is written. It was seen once
+in 125 runs, which is also why the rule is checked rather than the run.
 
 The last two rows are verified rather than assumed. The packaged build was run and its window
 opens, because tcl/tk having been bundled correctly is not something a build log tells you. The

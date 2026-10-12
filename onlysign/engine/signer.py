@@ -45,6 +45,12 @@ DEFAULT_TIMESTAMP_AUTHORITIES = (
 BACKEND_POWERSHELL = "powershell"
 BACKEND_SIGNTOOL = "signtool"
 
+# What an attempt achieved. Two values rather than three: an attempt either produced a timestamped
+# signature or it did not, and whether anything needs undoing is a separate question answered by the
+# signature being present at all.
+STAMPED = "stamped"
+TRY_THE_NEXT = "try-the-next-authority"
+
 
 @dataclass
 class Verdict:
@@ -323,6 +329,23 @@ def _sign_with_signtool(exe: str, path: str, thumbprint: str, timestamp_url: str
 
 # --- signing ------------------------------------------------------------------ #
 
+def attempt_outcome(signature: OwnSignature) -> str:
+    """What an attempt achieved, as a function of the signature it left behind and nothing else.
+
+    Pulled out of the loop that uses it so the rule can be checked without needing a timestamp
+    authority that misbehaves on cue -- which is the one thing here that cannot be arranged, since a
+    refused connection and a refusal in the protocol both end the attempt before anything is written.
+
+    There are two answers, and the defect this exists to keep out was in the middle case: an
+    authority that *answers* without timestamping the signature has failed exactly as much as one
+    that does not answer, so the next authority gets its turn. Returning `STAMPED` only for a
+    timestamped signature is the whole rule.
+    """
+    if signature.present and signature.timestamped:
+        return STAMPED
+    return TRY_THE_NEXT
+
+
 def sign_file(path: str | os.PathLike[str], *, thumbprint: str,
               timestamp_authorities: Iterable[str] = DEFAULT_TIMESTAMP_AUTHORITIES,
               allow_untimestamped: bool = False, force: bool = False,
@@ -390,16 +413,28 @@ def sign_file(path: str | os.PathLike[str], *, thumbprint: str,
         last_error = str(outcome.get("message", "")) if isinstance(outcome, dict) else ""
 
         signature = own_signature(path)
-        if signature.present and signature.timestamped:
+        if attempt_outcome(signature) == STAMPED:
             result.timestamp_authority = url
+            result.error = ""
+            result.restored = None
             stamped = True
             break
-        if signature.present and not signature.timestamped:
-            # The backend left a signature that can never outlive the certificate, and signing again
-            # on top of it would append a second one. Back the whole attempt out instead.
+        if signature.present:
+            # This attempt wrote a signature that can never outlive the certificate -- because the
+            # authority answered without timestamping it, or did not answer. Undo it and let the
+            # next authority have its turn, rather than stopping here with authorities untried:
+            # that early return is what turned a flaky first authority into a failed signing while
+            # two working ones sat unused.
+            #
+            # Undoing first is what makes trying again safe: signing on top of the signature just
+            # left would append a second one. `roll_back` truncates to the captured size and puts
+            # back the two fields a signature touches, so the file is byte-identical to what it was
+            # and the next attempt starts from a clean file.
             roll_back(f"{url} produced a signature without a timestamp; the attempt was undone rather "
                       f"than left half-made")
-            return result
+            if not result.restored:
+                # The file could not be put back, so there is nothing sound to sign on top of.
+                return result
 
     if not stamped and authorities:
         if not allow_untimestamped:

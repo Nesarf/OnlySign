@@ -37,6 +37,19 @@ from onlysign.engine import (  # noqa: E402
 
 PASSED = 0
 FAILED = 0
+UNTESTED = 0
+
+
+class NotTested(Exception):
+    """Raised by a check that could not be given what it needs, so it says nothing either way.
+
+    A check here is allowed to report this only when the missing thing is the environment and not
+    the tool -- the one such thing being a timestamp authority, which is the only part of this
+    toolchain that is not on this machine. It exists because the alternative is worse than useless:
+    a check that turns "the authority did not answer" into "FAILED" reports a defect that is not
+    there, and the fix it invites is to edit working code.
+    """
+
 
 SAMPLE_CANDIDATES = (
     r"C:\Windows\explorer.exe",
@@ -61,9 +74,13 @@ GATE_TEST_NOTICE = (
 
 
 def check(name: str, body) -> None:
-    global PASSED, FAILED
+    global PASSED, FAILED, UNTESTED
     try:
         body()
+    except NotTested as exc:
+        print(f"  untested  {name}")
+        print(f"          {exc}")
+        UNTESTED += 1
     except Exception as exc:                      # noqa: BLE001 - a check may fail any way it likes
         print(f"  FAILED  {name}")
         print(f"          {type(exc).__name__}: {exc}")
@@ -279,6 +296,25 @@ def main() -> int:
     sample = scratch / "sign-me.exe"
     signed_result: signer.SignResult | None = None
 
+    def only_the_authority_failed(result) -> bool:
+        """True when the one thing that went wrong was that no timestamp authority supplied one.
+
+        This is the distinction three checks below turn on, and it is drawn narrowly on purpose. A
+        timestamp authority is the only part of this toolchain that is not on this machine, so "the
+        authority did not answer" is a statement about the network rather than about the tool. What
+        the tool does when that happens is checked without any network at all, by
+        `a timestamp failure leaves the file untouched and unsigned` further down.
+
+        It does not cover everything, and must not: the file has to have been rolled back exactly,
+        and the failure has to be one the tool attributed to the authority. A signature by the wrong
+        certificate, a file that could not be put back, or any other error stays a failure here.
+        """
+        if result.ok:
+            return False
+        blamed_the_authority = ("produced a signature without a timestamp" in result.error
+                                or "no timestamp was obtained" in result.error)
+        return blamed_the_authority and result.restored is True
+
     def prepare():
         shutil.copy2(sample_source(args.sample), sample)
         if not pe.strip_signature(sample):
@@ -289,21 +325,37 @@ def main() -> int:
     def sign_once():
         nonlocal signed_result
         signed_result = signer.sign_file(sample, thumbprint=throwaway.thumbprint)
+        if only_the_authority_failed(signed_result):
+            raise NotTested(f"no authority supplied a timestamp on this run, and the file was put "
+                            f"back: {signed_result.error}")
         truthy(signed_result.ok, f"signing did not succeed: {signed_result.error or signed_result.skipped}")
         truthy(signed_result.signature.timestamped, "the signature carries no timestamp")
         truthy(signed_result.signature.matches(throwaway.thumbprint), "the signer is not the chosen certificate")
-        same(signed_result.timestamp_authority, signer.DEFAULT_TIMESTAMP_AUTHORITIES[0],
-             "the authority that answered")
+        # Which authority answered is a fact about the network, so the check is the property the
+        # tool is responsible for: the timestamp came from one of the authorities it was given.
+        # Asserting the first one specifically made a flaky first authority look like a defect.
+        truthy(signed_result.timestamp_authority in signer.DEFAULT_TIMESTAMP_AUTHORITIES,
+               f"the timestamp came from {signed_result.timestamp_authority!r}, which is not one of "
+               f"the authorities the tool was given")
         truthy(signed_result.after_hash != signed_result.before_hash,
                "signing changed nothing, so there is no signature in the file")
 
     def refuse_second_signature():
+        # Stated as a precondition rather than assumed: this check needs a signed file, and the
+        # signing above can come back without one for a reason that is not this check's business.
+        # Left implicit, a missing precondition was reported as "signing an already signed file was
+        # allowed" -- which reads as a hole in the rule and is nothing of the sort.
+        if not signer.carries_own_signature(sample):
+            raise NotTested("there is no signed file to refuse a second signature on, because the "
+                            "signing above did not leave one")
         again = signer.sign_file(sample, thumbprint=throwaway.thumbprint)
         falsy(again.ok, "signing an already signed file was allowed")
         truthy("already carries a signature" in again.skipped,
                f"the refusal does not say why: {again.skipped!r}")
 
     def record_shape():
+        if signed_result is None or not signed_result.ok:
+            raise NotTested("no successful signing happened, so there is no record to describe")
         record = signed_result.to_record(note="self test")
         for field in ("t", "file", "name", "size", "sha256_signed", "sha256_unsigned",
                       "signer", "thumbprint", "timestamped", "tsa", "note"):
@@ -335,6 +387,22 @@ def main() -> int:
         truthy(not signature.matches("BB" * 20), "a different thumbprint must not match")
         truthy(not signer.OwnSignature().matches("AA" * 20), "an absent signer must not match anything")
 
+    def an_authority_without_a_timestamp_does_not_end_the_list():
+        # Checked directly rather than end to end, for the same reason as the line above: the state
+        # that matters -- an authority that answers but leaves a signature with no timestamp on it --
+        # could not be arranged here. A refused connection and a refusal in the timestamp protocol
+        # both end the attempt before anything is written, so the only real occurrence was a flaky
+        # authority seen once in 125 runs. What the loop does next is a function of the signature and
+        # nothing else, so the signature is what gets checked -- including the middle case, which
+        # used to stop the loop with authorities still untried.
+        stamped = signer.OwnSignature(present=True, thumbprint="AA" * 20, timestamped=True)
+        unstamped = signer.OwnSignature(present=True, thumbprint="AA" * 20, timestamped=False)
+        same(signer.attempt_outcome(stamped), signer.STAMPED, "a timestamped signature")
+        same(signer.attempt_outcome(unstamped), signer.TRY_THE_NEXT,
+             "a signature with no timestamp did not pass to the next authority")
+        same(signer.attempt_outcome(signer.OwnSignature()), signer.TRY_THE_NEXT,
+             "an attempt that left no signature at all")
+
     check("the sample starts out unsigned", prepare)
     check("signing produces a timestamped signature by the chosen certificate", sign_once)
     check("the same file is refused a second signature", refuse_second_signature)
@@ -342,6 +410,8 @@ def main() -> int:
     check("a timestamp failure leaves the file untouched and unsigned",
           timestamp_failure_leaves_nothing_behind)
     check("the signer is compared by thumbprint", pinning_line)
+    check("an authority that gives no timestamp does not end the list",
+          an_authority_without_a_timestamp_does_not_end_the_list)
 
     # --- discovery and the audit ---------------------------------------------- #
     print()
@@ -724,7 +794,15 @@ def main() -> int:
                  ") | Remove-Item -Force\n'test certificate removed'")
 
     print()
-    print(f"{PASSED} check(s) passed, {FAILED} failed")
+    # The wording is left alone when nothing was untested, so that a run that tested everything
+    # reads exactly as it always has -- and a run that did not is visibly different rather than
+    # passing for a number that quietly got smaller.
+    if UNTESTED:
+        print(f"{PASSED} check(s) passed, {FAILED} failed, {UNTESTED} not tested")
+        print("  a check is not tested when the network could not supply what it needs; the tool's "
+              "behaviour in that case is checked without the network")
+    else:
+        print(f"{PASSED} check(s) passed, {FAILED} failed")
     if args.keep:
         print(f"the scratch directory was kept at {scratch}")
     else:
