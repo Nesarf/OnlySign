@@ -499,7 +499,7 @@ def main() -> int:
         truthy(GATE_NOTICE_MARKER in out, f"the notice was not shown: {out[:300]}")
         truthy("\u2588" in out or "\u2580" in out, "the mark in the notice did not survive the trip")
         truthy("To proceed with installation? (Y/N)" in out, "the question was not asked")
-        truthy("Installation was not started." in out, "declining did not stop the installation")
+        truthy("cannot be carried out at this moment" in out, "declining did not stop the installation")
         same(proc.returncode, 0, "the exit code after declining")
 
     def gate_says_which_signature_it_found():

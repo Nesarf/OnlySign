@@ -84,8 +84,14 @@ PHRASES: dict[str, dict[str, str]] = {
     "no_timestamp_b": {"en": "expires. Installation was not started.",
                        "zh": "没有开始安装。", "ja": "取り付けは始めていません。"},
 
-    "not_started": {"en": "Installation was not started.", "zh": "没有开始安装。",
-                    "ja": "取り付けは始めていません。"},
+    # The one line a person meets by choosing not to go on, and the only place here where the words
+    # are allowed to have any weather in them. Everything else in this file is a refusal this tool
+    # made -- a signature that does not match, a timestamp that is missing -- and a warning should
+    # read plainly, because atmosphere over a warning hides the warning. Declining is the person's
+    # own act, so it can sound like one.
+    "not_started": {"en": "The installation cannot be carried out at this moment.",
+                    "zh": "安装不能在这一刻进行。",
+                    "ja": "インストールは今この時点では行えません。"},
     "starting": {"en": "Starting the installer...", "zh": "正在启动安装程序…",
                  "ja": "取り付けを始めます…"},
     "answered_cli": {"en": "   [answered on the command line]", "zh": "   [已在命令行上作答]",
