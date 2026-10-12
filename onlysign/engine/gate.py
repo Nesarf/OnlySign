@@ -108,7 +108,8 @@ function Read-Utf8Text([string]$path) {
 $transcript = Join-Path $here 'Install.transcript.txt'
 function Say([string]$text, [string]$colour = '') {
     if ($colour) { Write-Host $text -ForegroundColor $colour } else { Write-Host $text }
-    try { Add-Content -LiteralPath $transcript -Value $text -Encoding UTF8 } catch { }
+    try { [System.IO.File]::AppendAllText($transcript, $text + [char]10,
+            (New-Object System.Text.UTF8Encoding($false))) } catch { }
 }
 $phrases = @{}
 foreach ($line in (Read-Utf8Text (Join-Path $here '__PHRASES__')).Split([char]10)) {
