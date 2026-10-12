@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from onlysign import mark  # noqa: E402
 from onlysign import notice as notice_module  # noqa: E402
 from onlysign.engine import (  # noqa: E402
     audit, bootmark, certs, container, discover, gate, ledger, pe, ps, signer, trust, workflow,
@@ -891,6 +892,100 @@ def main() -> int:
 
     check("a mark fits in a boot sector and reads back", boot_mark_round_trip)
     check("the sector's own code prints the mark and stops", boot_mark_executes)
+
+    # --- the mark, from the command a person types ----------------------------- #
+    print()
+    print("marking a file that has nowhere to sign")
+
+    # A test's own identity, so what the mark says is checked without depending on whose names
+    # happen to be configured where this runs.
+    mark_identity = scratch / "mark-identity.json"
+    mark_identity.write_text(json.dumps({"primary": "TEST-PRIMARY",
+                                         "secondary": ["TEST-SECONDARY"]}), encoding="utf-8")
+    mark_work = scratch / "marking"
+    mark_work.mkdir()
+
+    def run_cli(*arguments: str) -> tuple[int, str]:
+        """Run the command line as a person would, and capture what it says."""
+        import io
+        import contextlib
+        from onlysign import cli
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            code = cli.main(list(arguments))
+        return code, buffer.getvalue()
+
+    def a_zip_carries_the_mark_and_the_digest_guards_it():
+        import zipfile
+        archive = mark_work / "marked.zip"
+        (mark_work / "payload.txt").write_text("something to put in a zip\n", encoding="utf-8")
+        with zipfile.ZipFile(archive, "w") as zipped:
+            zipped.write(mark_work / "payload.txt", "payload.txt")
+
+        code, said = run_cli("mark", str(archive), "--identity", str(mark_identity), "--year", "2026")
+        same(code, 0, f"the mark command's exit code ({said.strip()!r})")
+        found = mark.read_zip_mark(str(archive))
+        truthy(found.get("marked"), f"no mark was found in the archive: {said!r}")
+        same(found.get("holder"), "(c) 2026 TEST-PRIMARY [TEST-SECONDARY]",
+             "who the mark names, and with the secondary in brackets")
+        same(found.get("kind"), "hash-record", "the kind, which says how strong the mark is")
+        # The archive still opens: writing a comment must not damage an archive.
+        same(len(zipfile.ZipFile(archive).namelist()), 1, "entries still readable in the archive")
+
+        # And the digest has to guard something, or it is decoration. The comment is inside the file
+        # it describes, so what it hashes is the archive without the comment -- which is why this is
+        # reproducible at all, and why a change to the archive shows up here and not in the text.
+        same(found.get("digest_matches"), True, "the digest against the archive it was taken from")
+        with open(archive, "r+b") as handle:
+            first = handle.read(1)
+            handle.seek(0)
+            handle.write(bytes([first[0] ^ 0x01]))
+        after = mark.read_zip_mark(str(archive))
+        same(after.get("raw"), found.get("raw"), "the mark text after the archive was altered")
+        same(after.get("digest_matches"), False,
+             "the digest after one byte of the archive was flipped -- it has to notice")
+        with open(archive, "r+b") as handle:                     # put it back for the checks below
+            handle.seek(0)
+            handle.write(first)
+
+    def a_format_that_can_be_signed_is_refused():
+        # The boundary decision, as behaviour rather than as a paragraph: a PE has a slot a signature
+        # goes in, so marking it would put an unvouched claim beside a vouched one.
+        target = mark_work / "signable.exe"
+        shutil.copy2(sample_source(args.sample), target)
+        pe.strip_signature(target)
+        code, said = run_cli("mark", str(target), "--identity", str(mark_identity))
+        same(code, 0, f"refusing is not failing ({said.strip()!r})")
+        truthy("has a signature slot" in said, f"the refusal does not say why: {said!r}")
+        falsy(mark.read_zip_mark(str(target)).get("marked"),
+              "something was written into a format that should have been left alone")
+
+    def the_mark_command_writes_a_boot_sector():
+        out = mark_work / "sector.bin"
+        code, said = run_cli("mark", "--sector", str(out), "--identity", str(mark_identity))
+        same(code, 0, f"the sector's exit code ({said.strip()!r})")
+        sector = out.read_bytes()
+        same(len(sector), bootmark.SECTOR_SIZE, "the size of what it wrote")
+        same(sector[510:512], bootmark.BOOT_SIGNATURE, "the boot signature")
+        report = bootmark.read(sector)
+        same(report["problems"], [], "what reading the sector back complained about")
+        truthy(report["text"].startswith(mark.MARK_PREFIX), f"what the sector carries: {report['text']!r}")
+        truthy("TEST-PRIMARY" in report["text"], "the mark does not name the configured primary")
+        truthy("TEST-SECONDARY" in report["text"], "the secondary mark is missing")
+
+    def no_identity_means_no_mark():
+        target = mark_work / "anonymous.zip"
+        target.write_bytes(b"PK\x05\x06" + bytes(18))
+        code, said = run_cli("mark", str(target))
+        truthy(code != 0, "marking without an identity was accepted")
+        truthy("no identity" in said, f"the refusal does not say why: {said!r}")
+        falsy(mark.zip_comment(str(target)), "a mark was written with no identity configured")
+
+    check("a zip carries the mark and its digest guards the archive",
+          a_zip_carries_the_mark_and_the_digest_guards_it)
+    check("a format that can be signed is refused", a_format_that_can_be_signed_is_refused)
+    check("the mark command writes a boot sector", the_mark_command_writes_a_boot_sector)
+    check("no identity means no mark", no_identity_means_no_mark)
 
     # --- cleaning up after itself --------------------------------------------- #
     if throwaway is not None:

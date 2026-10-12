@@ -34,7 +34,7 @@ From a checkout, without building anything:
 ```powershell
 python -m onlysign.gui                          # the window
 python OnlySign.py                              # the same window, through the packaged entry point
-python -m onlysign selftest                     # run the engine against itself: 40 checks
+python -m onlysign selftest                     # run the engine against itself: 44 checks
 python -m onlysign selftest --keep              # leave the scratch directory behind to look at
 python tools/gui_smoke.py                       # drive the window the way a person would: 6 checks
 
@@ -221,12 +221,15 @@ onlysign/engine/discover.py  finding the artifacts, and saying how each one was 
 onlysign/engine/audit.py     asking the ledger whether it is still true
 onlysign/engine/trust.py     the two stores, and the difference between them
 onlysign/engine/workflow.py  the order of operations, which is where the rules live
+onlysign/engine/bootmark.py  a mark in 512 bytes, for the machines that cannot verify anything
+onlysign/mark.py             the mark line, and the carriers the verb puts it in
 onlysign/gui.py              the window; layout and a worker thread, nothing else
 onlysign/cli.py              the engine with a keyboard instead of a window
-onlysign/selftest.py         40 checks of the engine, in a scratch directory
+onlysign/selftest.py         44 checks of the engine, in a scratch directory
 tools/build.py               building the one-file executable
 tools/gui_smoke.py           6 checks that drive the window itself
 tools/cfb-probe.py           what a compound file's header says, against what the reader returned
+tools/boot-check.py          boots the mark sector on real firmware (needs QEMU; not a check)
 dist/                        built executables (not committed)
 ```
 
@@ -267,9 +270,35 @@ vouches for it, which is the same division of labour that puts `company` and `tr
 executable before anything signs it. For an MSI that means the summary information at build time,
 where the code page is known and the package is still the builder's to write.
 
-**It is not wired in yet.** `onlysign/mark.py` has no caller and the command line does not offer it,
-so the ZIP comment carrier is written and untested against a real artifact. That is a gap and is
-recorded as one rather than described as a feature.
+**It is wired in now, as `onlysign mark`.** The verb marks files that have nowhere to sign, produces
+a mark sector, and refuses the formats that do have somewhere:
+
+```
+python -m onlysign mark release.zip --identity IDENTITY.local.json --year 2026
+python -m onlysign mark --sector mark.bin --identity IDENTITY.local.json
+python -m onlysign mark --floppy boot.img --identity IDENTITY.local.json   # for an emulator to boot
+```
+
+The identity is required rather than defaulted, and that is the one rule the command enforces
+hardest: a mark is a claim of ownership, so it is an input and never a constant. A tool that invents
+a name to put in a copyright line has done the thing a mark must not do.
+
+**A digest inside a zip comment cannot describe the file that contains it.** The comment is part of
+the archive, so the value would have to depend on itself, and any number written there would be
+wrong the moment it was written. So the digest is taken over **the archive without any comment**:
+find the end-of-central-directory record, take everything before the comment-length field, append
+two zero bytes, hash that. Zeroing the length is what makes it one number for the archive whether or
+not a comment is present, so the same mark checks out against the marked file and against the same
+file with the comment stripped. The order matters and getting it wrong is silent, so the digest is
+taken and the comment written inside one function rather than left to the caller -- measured, one
+byte flipped anywhere in the archive makes the digest stop matching while the mark text is unchanged,
+which is what a hash in a mark is for. `--no-digest` writes the mark with `kind:visibility` instead,
+for a carrier where there is nothing to hash.
+
+An MSI, a PE and a CAB are **refused**, with the reason printed. That is not a missing feature: those
+formats have a slot a signature goes in, so on them the attribution belongs in something the
+signature covers. Marking one anyway would put a claim nothing vouches for beside a claim something
+does, and the weaker one is the one a reader is likelier to believe.
 
 One carrier in that family is finished, and it is the one for the oldest machines there are.
 `onlysign/engine/bootmark.py` builds a **512-byte boot sector** whose own code prints the mark on the
@@ -311,9 +340,9 @@ Built and checked at every level:
 
 | what | how it is checked |
 |---|---|
-| the engine | `python -m onlysign selftest` -- 40 checks, in a scratch directory |
+| the engine | `python -m onlysign selftest` -- 44 checks, in a scratch directory |
 | the window | `python tools/gui_smoke.py` -- 6 checks that open it and press its buttons |
-| both PowerShell editions | the same 40 checks under Windows PowerShell and under PowerShell 7 |
+| both PowerShell editions | the same 44 checks under Windows PowerShell and under PowerShell 7 |
 | the executable | about 13 MB, one file: lists certificates, answers `scan --help`, opens its window |
 | reading a container | `python tools/cfb-probe.py <dir>` -- every compound file in it, against its own header |
 

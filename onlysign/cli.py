@@ -22,10 +22,11 @@ import os
 import sys
 from typing import Any
 
+from . import mark as marks
 from . import notice
 from . import phrases
 from .notice import text as notice_text
-from .engine import audit, certs, discover, gate, ledger, pe, signer, trust, workflow
+from .engine import audit, bootmark, certs, discover, gate, ledger, pe, signer, trust, workflow
 
 
 def _print_certificates() -> int:
@@ -351,7 +352,123 @@ def build_parser() -> argparse.ArgumentParser:
     tru.add_argument("--cer", default="", help="a public certificate file to install from")
     tru.add_argument("--dry-run", action="store_true")
     tru.set_defaults(func=_cmd_trust)
+
+    mar = sub.add_parser(
+        "mark",
+        help="put an attribution mark where there is nowhere to sign",
+        description="Signing is what a platform gives you; marking is text placed where it will "
+                    "still be there. A format that has a signature slot is signed, not marked, "
+                    "and this refuses to mark one -- see the README for why. A mark goes on "
+                    "before anything signs the file, never after: a mark added later changes the "
+                    "bytes and stops every signature over them from verifying.")
+    mar.add_argument("paths", nargs="*", help="files to mark (a zip takes a comment)")
+    mar.add_argument("--identity", default="",
+                     help="a local JSON file naming who the mark belongs to; required, because a "
+                          "mark that invents a name is not a mark")
+    mar.add_argument("--year", default="", help="put a year in front of the primary name")
+    mar.add_argument("--no-digest", action="store_true",
+                     help="leave the hash out, marking the file as claimed but not as unaltered")
+    mar.add_argument("--sector", default="",
+                     help="write a 512-byte boot sector carrying the mark to this path, instead of "
+                          "marking files")
+    mar.add_argument("--floppy", default="",
+                     help="the same sector as the boot record of a 1.44 MB image, for an emulator")
+    mar.add_argument("--dry-run", action="store_true")
+    mar.add_argument("--json", action="store_true")
+    mar.set_defaults(func=_cmd_mark)
     return parser
+
+
+def _cmd_mark(args: argparse.Namespace) -> int:
+    """Put a mark where there is nowhere to sign -- and refuse where there is.
+
+    The refusal is the design, not a missing feature. A PE, an MSI and a CAB all have a slot a
+    signature goes in, so on those the attribution belongs in something the signature covers: a
+    certificate subject, a version resource. Marking one anyway would put a claim that nothing
+    vouches for beside a claim that something does, and the weaker one is the one a reader is
+    likelier to believe. The mark exists for the formats that have no such slot.
+    """
+    try:
+        primary, secondary = marks.names_from(args.identity)
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+    if not primary:
+        print("no identity: pass --identity <file> naming who the mark belongs to.")
+        print("A mark is a claim of ownership, so it is an input and never a constant -- this "
+              "tool ships neutral, and inventing a name here would be the one thing a mark "
+              "must not do.")
+        return 1
+
+    if args.floppy or args.sector:
+        out = args.floppy or args.sector
+        body = marks.mark_line(primary=primary, secondary=secondary, year=args.year,
+                               kind="boot-sector")
+        try:
+            size = (bootmark.write_image(out, body) if args.floppy
+                    else bootmark.write(out, body))
+        except (OSError, bootmark.MarkDoesNotFit) as exc:
+            print(f"could not write {out}: {exc}")
+            return 1
+        report = {"path": out, "carrier": "boot sector" + (" in a 1.44 MB image" if args.floppy else ""),
+                  "bytes": size, "line": body,
+                  "strength": "visibility only -- anyone can write these bytes and nothing "
+                              "vouches for them"}
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(f"{out}  ({size} bytes)")
+            print(f"     carrier  : {report['carrier']}")
+            print(f"     mark     : {body}")
+            print(f"     strength : {report['strength']}")
+        return 0
+
+    if not args.paths:
+        print("nothing to mark: name a file, or --sector <out> to build a boot sector.")
+        return 1
+
+    results, refused, failed = [], 0, 0
+    for path in args.paths:
+        if not os.path.isfile(path):
+            print(f"{path}: no such file")
+            failed += 1
+            continue
+        kind = pe.identify(path)
+        if pe.signable(kind):
+            print(f"{os.path.basename(path)}: {pe.describe(kind)} -- this format has a signature "
+                  f"slot, so it is signed rather than marked")
+            print("     a mark here would be a weaker claim beside a stronger one; put the "
+                  "attribution where the signature covers it (a certificate subject, a version "
+                  "resource) and sign the file")
+            refused += 1
+            continue
+        if marks.zip_eocd_at(path) is None:
+            print(f"{os.path.basename(path)}: no carrier for this format yet -- a zip takes a "
+                  f"comment, and a boot sector takes the mark itself")
+            failed += 1
+            continue
+        try:
+            done = marks.mark_zip(path, primary=primary, secondary=secondary, year=args.year,
+                                  digest=not args.no_digest, dry_run=args.dry_run)
+        except (OSError, ValueError) as exc:
+            print(f"{os.path.basename(path)}: {exc}")
+            failed += 1
+            continue
+        results.append(done)
+        if args.json:
+            continue
+        print(f"{os.path.basename(path)}: {'would mark' if args.dry_run else 'marked'} "
+              f"({done['digest'][:16] + '...' if done['digest'] else 'no digest'})")
+
+    if args.json:
+        print(json.dumps({"marked": results, "refused": refused, "failed": failed},
+                         ensure_ascii=False, indent=2))
+    elif results or refused or failed:
+        print(f"{len(results)} marked, {refused} refused (a format that can be signed), "
+              f"{failed} not marked")
+        if args.dry_run:
+            print("dry run: nothing was written.")
+    return 0 if not failed else 1
 
 
 def take_language(arguments: list[str]) -> tuple[list[str], str]:
