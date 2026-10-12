@@ -25,16 +25,78 @@ import base64
 import contextlib
 import json
 import os
+import shutil
 import subprocess
 from typing import Any
 
 _SYSTEM_ROOT = os.environ.get("SystemRoot", r"C:\Windows")
 _WINDOWS_POWERSHELL = os.path.join(_SYSTEM_ROOT, "System32", "WindowsPowerShell", "v1.0")
 
-POWERSHELL = os.path.join(_WINDOWS_POWERSHELL, "powershell.exe")
+def powershell_candidates() -> list[str]:
+    """Every PowerShell that could do this work, best first.
 
-# Exactly the module directory of the Windows PowerShell that ships with Windows, and nothing else.
-OWN_MODULES = os.path.join(_WINDOWS_POWERSHELL, "Modules")
+    Windows PowerShell comes first because it is the one that is always there and the one this
+    engine was hardened against. PowerShell 7 is looked for next, and it is looked for rather than
+    assumed: the tool used to name one executable, `powershell.exe`, so a machine that has only
+    PowerShell 7 -- or a future Windows that no longer ships the older one -- could not run at all.
+    """
+    candidates: list[str] = []
+    override = os.environ.get("ONLYSIGN_POWERSHELL", "").strip()
+    if override:
+        candidates.append(override)
+    candidates.append(os.path.join(_WINDOWS_POWERSHELL, "powershell.exe"))
+    found = shutil.which("pwsh") or shutil.which("pwsh.exe")
+    if found:
+        candidates.append(found)
+    # The usual place PowerShell 7 installs to, for the case where it is not on PATH.
+    for version in ("7", "7-preview", "6"):
+        candidates.append(os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"),
+                                       "PowerShell", version, "pwsh.exe"))
+    return candidates
+
+
+def resolve() -> tuple[str, str]:
+    """(executable, its own module directory) for the first PowerShell that can run.
+
+    The module directory is taken from the executable's own folder rather than written down. Both
+    PowerShells keep `Modules` beside the binary, so one rule covers both -- and it has to be this
+    way round, because pinning the path to one installation is exactly what made the other one
+    unusable: handed Windows PowerShell's module path, PowerShell 7 loads a module built for a
+    different runtime and loses `Get-AuthenticodeSignature` along with it.
+    """
+    for candidate in powershell_candidates():
+        if not candidate or not os.path.isfile(candidate):
+            continue
+        modules = os.path.join(os.path.dirname(candidate), "Modules")
+        if os.path.isdir(modules):
+            return candidate, modules
+        # A PowerShell with no module directory beside it can still run; give it an empty path of
+        # its own rather than somebody else's, which is the failure this exists to avoid.
+        return candidate, modules
+    return "", ""
+
+
+def module_path_for(executable: str) -> str | None:
+    """The PSModulePath to hand this PowerShell, or None to leave the inherited one alone.
+
+    The two editions want opposite things, and giving them the same thing is what made each of them
+    fail in turn:
+
+    * **Windows PowerShell** must be given its own module directory and nothing else. PowerShell 7's
+      directories, if they come first, make it load binary modules built for a different runtime,
+      and `Set-AuthenticodeSignature` ceases to exist.
+    * **PowerShell 7** must keep its default path, which deliberately includes the Windows PowerShell
+      module directories. That is where it finds the Windows-only modules it does not ship -- PKI,
+      and with it `New-SelfSignedCertificate`. Narrowing the path here is what broke certificate
+      creation: it was found by running the whole self-test under PowerShell 7, where 15 checks
+      failed and every one of them traced back to a certificate that could not be made.
+    """
+    if "WindowsPowerShell" in executable.replace("/", os.sep):
+        return os.path.join(os.path.dirname(executable), "Modules")
+    return None
+
+
+POWERSHELL, OWN_MODULES = resolve()
 
 _PREAMBLE = (
     # Without this, a redirected stdout is written in the OEM code page and a path with a Chinese
@@ -68,16 +130,35 @@ def literal(value: Any) -> str:
 
 
 def available() -> bool:
-    return os.path.isfile(POWERSHELL)
+    """Whether any PowerShell that can do this work is on the machine."""
+    if not POWERSHELL:
+        return False
+    env = dict(os.environ)
+    modules = module_path_for(POWERSHELL)
+    if modules is not None:
+        env["PSModulePath"] = modules
+    try:
+        proc = subprocess.run(
+            [POWERSHELL, "-NoProfile", "-NonInteractive", "-Command",
+             "(Get-Command Set-AuthenticodeSignature -ErrorAction Stop).Name"],
+            capture_output=True, env=env, timeout=60,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0 and b"Set-AuthenticodeSignature" in proc.stdout
 
 
 def run(script: str, *, timeout: float = DEFAULT_TIMEOUT) -> subprocess.CompletedProcess:
     """Run a PowerShell script and hand back the finished process."""
     if not available():
-        raise PowerShellError(f"no Windows PowerShell at {POWERSHELL}")
+        raise PowerShellError(
+            "no PowerShell found. Looked for Windows PowerShell and for PowerShell 7; set "
+            "ONLYSIGN_POWERSHELL to name one yourself.")
     encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
     env = dict(os.environ)
-    env["PSModulePath"] = OWN_MODULES
+    modules = module_path_for(POWERSHELL)
+    if modules is not None:
+        env["PSModulePath"] = modules
     try:
         proc = subprocess.run(
             [POWERSHELL, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
