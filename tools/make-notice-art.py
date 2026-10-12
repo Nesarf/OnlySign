@@ -13,6 +13,11 @@ Two decisions here are about sharpness rather than fidelity, because a console i
   cell's coverage and then asking whether the majority of it is ink gives edges that follow the
   original instead of wobbling along it. Bilinear and bicubic have the same problem in smaller
   measure, so the default is `box`.
+* **A density ramp is a third option**, and the one that ages best in a terminal: the background
+  falls away and the mark is carried by the thickest characters, so it reads at any size and in any
+  code page (the ramp here is pure ASCII). `--cols-only` picks the height from the mark's own aspect
+  and the cell shape, because a notice has to fit a width and does not care how far it scrolls.
+
 * **Half blocks by default, solid blocks on request.** U+2580 and U+2584 double the vertical detail
   a terminal can show, and they are present in both CP437 and CP936, so no code page is required.
   Their cost is that many fonts leave a hairline between the two halves of a cell, which reads as a
@@ -30,7 +35,15 @@ import numpy as np
 FILTERS = {"box": Image.BOX, "bilinear": Image.BILINEAR, "bicubic": Image.BICUBIC,
            "lanczos": Image.LANCZOS}
 
+# Dark to light. `ramp` is the style a console shows best when the mark is ink on a dark field: the
+# background falls away to spaces and the mark's mass is carried by @, so the drawing appears out of
+# the terminal rather than sitting on it as a filled plate.
 DENSITY_RAMP = " .:-=+*#%@"
+
+# What one character cell is, height over width. A terminal cell is taller than it is wide -- about
+# 2:1 with the usual fonts -- so a mark of a given aspect needs fewer rows than columns than a square
+# grid would suggest. Getting this wrong is what makes a drawing look vertically squashed.
+DEFAULT_CELL_ASPECT = 2.0
 
 
 def _coverage(source: str, cols: int, rows: int, resample) -> np.ndarray:
@@ -45,13 +58,14 @@ def _coverage(source: str, cols: int, rows: int, resample) -> np.ndarray:
 
 
 def art(source: str, cols: int, rows: int, *, style: str = "half", resample: str = "box",
-        threshold: float = 0.5) -> list[str]:
+        threshold: float = 0.5, ramp: str = "") -> list[str]:
     cover = _coverage(source, cols, rows, FILTERS[resample])
     top = cover[0::2, :] >= threshold
     bottom = cover[1::2, :] >= threshold
     average = (cover[0::2, :] + cover[1::2, :]) / 2.0
 
     lines: list[str] = []
+    ramp = ramp or DENSITY_RAMP
     for row in range(rows):
         cells = []
         for col in range(cols):
@@ -63,8 +77,8 @@ def art(source: str, cols: int, rows: int, *, style: str = "half", resample: str
             elif style == "solid":
                 cells.append("\u2588" if average[row, col] >= threshold else " ")
             else:
-                step = min(int(average[row, col] * len(DENSITY_RAMP)), len(DENSITY_RAMP) - 1)
-                cells.append(DENSITY_RAMP[step])
+                step = min(int(average[row, col] * len(ramp)), len(ramp) - 1)
+                cells.append(ramp[step])
         lines.append("".join(cells).rstrip())
     return lines
 
@@ -75,14 +89,31 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cols", type=int, default=52)
     parser.add_argument("--rows", type=int, default=32)
     parser.add_argument("--style", default="half", choices=("half", "solid", "density"))
+    parser.add_argument("--ramp", default=DENSITY_RAMP,
+                        help="the characters for --style density, dark first")
+    parser.add_argument("--cols-only", type=int, default=0,
+                        help="give a width and let the height follow the mark's own aspect, "
+                             "which is what a notice wants: width is what must fit")
+    parser.add_argument("--cell-aspect", type=float, default=DEFAULT_CELL_ASPECT,
+                        help="height over width of one character cell; 2.0 for the usual terminal")
     parser.add_argument("--filter", default="box", choices=tuple(FILTERS),
                         help="how cells are sampled; box averages and keeps edges crisper")
     parser.add_argument("--threshold", type=float, default=0.5,
                         help="coverage above which a cell counts as ink")
     args = parser.parse_args(argv)
 
-    for line in art(args.source, args.cols, args.rows, style=args.style,
-                    resample=args.filter, threshold=args.threshold):
+    cols, rows = args.cols, args.rows
+    if args.cols_only:
+        # The height follows from the mark and the cell, rather than being asked for: an art that has
+        # to fit a terminal has one dimension that matters and one that does not.
+        alpha = np.asarray(Image.open(args.source).convert("RGBA"))[..., 3].astype(float)
+        ys, xs = np.nonzero(alpha > 0)
+        aspect = (ys.max() - ys.min() + 1) / (xs.max() - xs.min() + 1)
+        cols = args.cols_only
+        rows = max(1, round(cols * aspect / args.cell_aspect))
+
+    for line in art(args.source, cols, rows, style=args.style,
+                    resample=args.filter, threshold=args.threshold, ramp=args.ramp):
         print(line)
     return 0
 
