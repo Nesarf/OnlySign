@@ -32,7 +32,7 @@ if str(ROOT) not in sys.path:
 
 from onlysign import notice as notice_module  # noqa: E402
 from onlysign.engine import (  # noqa: E402
-    audit, certs, container, discover, gate, ledger, pe, ps, signer, trust, workflow,
+    audit, bootmark, certs, container, discover, gate, ledger, pe, ps, signer, trust, workflow,
 )
 
 PASSED = 0
@@ -787,6 +787,110 @@ def main() -> int:
     check("a claimed length is not believed", container_does_not_believe_a_claimed_length)
     check("a directory chain that loops is refused", container_does_not_follow_a_chain_that_loops)
     check("something that is not a container is refused", container_refuses_what_is_not_one)
+
+    # --- a mark in the one place every PC can read ---------------------------- #
+    print()
+    print("a mark in a boot sector")
+
+    # A test's own names, so what the sector does with a mark is checked without depending on whose
+    # name happens to be configured where this runs.
+    boot_mark_text = "ONLYSIGN-MARK v1 | (c) TEST-PRIMARY [TEST-SECONDARY] | kind:boot-sector"
+
+    def boot_mark_round_trip():
+        sector = bootmark.build(boot_mark_text)
+        same(len(sector), bootmark.SECTOR_SIZE, "the size of the sector")
+        same(sector[510:512], bootmark.BOOT_SIGNATURE, "what firmware looks for at offset 510")
+        # The one thing in here that could be wrong silently. `mov si, imm` is assembled against the
+        # length of the code, so an edit to the code that is not reassembled leaves a sector that is
+        # perfectly well formed and prints from the wrong address. This check exists because it did
+        # catch exactly that: the immediate was read from one byte too late.
+        truthy(bootmark.text_offset_matches(),
+               "the code does not load its text from where the text begins")
+        report = bootmark.read(sector)
+        same(report["problems"], [], "what reading the sector back complained about")
+        truthy(report["is_sector"], "the sector was not recognised as one")
+        truthy(report["our_code"], "the code in the sector is not the code this tool writes")
+        truthy(report["carries_mark"], "no mark was found in the sector")
+        same(report["text"], boot_mark_text, "the text that came back out of the sector")
+        # Refused rather than truncated: a mark that has been quietly shortened still parses as a
+        # mark, and would name a party that never agreed to what it now says.
+        try:
+            bootmark.build("x" * (bootmark.MAX_TEXT_BYTES + 1))
+        except bootmark.MarkDoesNotFit:
+            pass
+        else:
+            raise AssertionError("a mark too long for a boot sector was accepted rather than refused")
+
+    def boot_mark_executes():
+        try:
+            from unicorn import (  # noqa: PLC0415 - the check reports untested without it
+                UC_ARCH_X86, UC_HOOK_CODE, UC_HOOK_INSN, UC_HOOK_INTR, UC_MODE_16, Uc,
+            )
+            from unicorn.x86_const import (  # noqa: PLC0415
+                UC_X86_INS_OUT, UC_X86_REG_AX, UC_X86_REG_CS, UC_X86_REG_IP,
+            )
+        except ImportError:
+            raise NotTested(
+                "unicorn is not installed, so the sector's machine code cannot be executed here; "
+                "what the sector is made of is still checked above")
+        sector = bootmark.build(boot_mark_text)
+        uc = Uc(UC_ARCH_X86, UC_MODE_16)
+        uc.mem_map(0x0000, 0x10000)                 # the first 64 KB: real mode's whole world
+        uc.mem_write(bootmark.LOAD_ADDRESS, sector)
+        uc.reg_write(UC_X86_REG_CS, 0)
+        uc.reg_write(UC_X86_REG_IP, bootmark.LOAD_ADDRESS)
+        screen: list[str] = []
+        serial: list[str] = []
+        halted = {"value": False}
+        lcr = {"dlab": False}
+
+        def on_interrupt(uc_, intno, _user):
+            # Unicorn hands the interrupt to this callback instead of executing it, and by then IP is
+            # already past the two-byte `int`. Advancing it here as well steps over the `out dx, al`
+            # that follows and lands on the 0xF4 inside a `jmp` -- which halts the CPU after exactly
+            # one character. Getting this wrong therefore looks like success, which is why the
+            # comparison below is against the whole mark and not against "something was printed".
+            if intno == bootmark.BIOS_TELETYPE:
+                ax = uc_.reg_read(UC_X86_REG_AX)
+                if (ax >> 8) & 0xFF == 0x0E:
+                    screen.append(chr(ax & 0xFF))
+
+        def on_out(uc_, port, size, value, _user):
+            if port == 0x3FB:                        # line control: bit 7 is the divisor latch
+                lcr["dlab"] = bool(value & 0x80)
+            elif port == bootmark.COM1 and not lcr["dlab"]:
+                # While the divisor latch is on, a write to 0x3F8 is the baud divisor rather than a
+                # character. Without this the sector's own setup byte is captured as if printed.
+                serial.append(chr(value & 0xFF))
+
+        def on_code(uc_, address, size, _user):
+            # Unicorn will not hook HLT as an instruction, so it is recognised by its opcode -- which
+            # is the byte the CPU would decode either way.
+            if uc_.mem_read(address, 1) == b"\xf4":
+                halted["value"] = True
+                uc_.emu_stop()
+
+        uc.hook_add(UC_HOOK_INTR, on_interrupt)
+        uc.hook_add(UC_HOOK_INSN, on_out, None, 1, 0, UC_X86_INS_OUT)
+        uc.hook_add(UC_HOOK_CODE, on_code)
+        uc.emu_start(bootmark.LOAD_ADDRESS, 0, count=200000)   # capped, so a bad loop cannot spin
+        expected = boot_mark_text + "\r\n"
+
+        def excerpt(value: str) -> str:
+            """A capture, shortened for a message. A loop that never reaches its NUL writes padding
+            for as long as the cap allows, so the failure of this check used to print a hundred
+            thousand NULs into the transcript -- a check that buries the report it is part of."""
+            return value if len(value) <= 160 else value[:160] + f"... [{len(value)} characters]"
+
+        for path, captured in (("COM1", "".join(serial)), ("the screen", "".join(screen))):
+            if captured != expected:
+                raise AssertionError(
+                    f"what the sector wrote to {path} is not the mark: got {excerpt(captured)!r}, "
+                    f"expected {expected!r}")
+        truthy(halted["value"], "the sector never halted, so it is still looping")
+
+    check("a mark fits in a boot sector and reads back", boot_mark_round_trip)
+    check("the sector's own code prints the mark and stops", boot_mark_executes)
 
     # --- cleaning up after itself --------------------------------------------- #
     if throwaway is not None:

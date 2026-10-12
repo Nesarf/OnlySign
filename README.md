@@ -34,7 +34,7 @@ From a checkout, without building anything:
 ```powershell
 python -m onlysign.gui                          # the window
 python OnlySign.py                              # the same window, through the packaged entry point
-python -m onlysign selftest                     # run the engine against itself: 38 checks
+python -m onlysign selftest                     # run the engine against itself: 40 checks
 python -m onlysign selftest --keep              # leave the scratch directory behind to look at
 python tools/gui_smoke.py                       # drive the window the way a person would: 6 checks
 
@@ -223,7 +223,7 @@ onlysign/engine/trust.py     the two stores, and the difference between them
 onlysign/engine/workflow.py  the order of operations, which is where the rules live
 onlysign/gui.py              the window; layout and a worker thread, nothing else
 onlysign/cli.py              the engine with a keyboard instead of a window
-onlysign/selftest.py         38 checks of the engine, in a scratch directory
+onlysign/selftest.py         40 checks of the engine, in a scratch directory
 tools/build.py               building the one-file executable
 tools/gui_smoke.py           6 checks that drive the window itself
 tools/cfb-probe.py           what a compound file's header says, against what the reader returned
@@ -271,15 +271,35 @@ where the code page is known and the package is still the builder's to write.
 so the ZIP comment carrier is written and untested against a real artifact. That is a gap and is
 recorded as one rather than described as a feature.
 
+One carrier in that family is finished, and it is the one for the oldest machines there are.
+`onlysign/engine/bootmark.py` builds a **512-byte boot sector** whose own code prints the mark on the
+BIOS teletype and down COM1, and stops. It is the floor of the whole idea: a boot sector is not a
+format with a slot for attribution, it is the first sector of a disk, read by firmware before any
+operating system exists, on machines that cannot verify a signature and in some cases cannot run
+anything modern at all. It is also **visibility only**, and says so in its own `kind:` -- anyone can
+write those 512 bytes and nothing vouches for them.
+
+What it is worth is bounded by what it is; what it *is* is verified. The assembly is nasm's, the
+bytes were disassembled with ndisasm to confirm they are the instructions intended, and the
+self-test **executes the sector on a real x86 emulator** -- Unicorn, the CPU core QEMU itself uses --
+capturing the teletype characters and the port writes and requiring the whole mark to come out of
+both before the CPU halts. Firmware is stubbed, because Unicorn has no BIOS: that half is stated
+rather than glossed. The check compares against the entire line rather than against "something was
+printed", and that is not pedantry -- advancing the program counter by hand in the interrupt hook
+stops the sector after exactly one character and looks like success.
+
+Of the two checks, the one that does not need an emulator runs everywhere, and the one that does
+reports **not tested** when Unicorn is absent, which is the outcome that mechanism exists for.
+
 ## Status
 
 Built and checked at every level:
 
 | what | how it is checked |
 |---|---|
-| the engine | `python -m onlysign selftest` -- 38 checks, in a scratch directory |
+| the engine | `python -m onlysign selftest` -- 40 checks, in a scratch directory |
 | the window | `python tools/gui_smoke.py` -- 6 checks that open it and press its buttons |
-| both PowerShell editions | the same 38 checks under Windows PowerShell and under PowerShell 7 |
+| both PowerShell editions | the same 40 checks under Windows PowerShell and under PowerShell 7 |
 | the executable | about 13 MB, one file: lists certificates, answers `scan --help`, opens its window |
 | reading a container | `python tools/cfb-probe.py <dir>` -- every compound file in it, against its own header |
 
