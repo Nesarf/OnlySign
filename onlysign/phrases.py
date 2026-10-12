@@ -84,18 +84,9 @@ PHRASES: dict[str, dict[str, str]] = {
     "no_timestamp_b": {"en": "expires. Installation was not started.",
                        "zh": "没有开始安装。", "ja": "取り付けは始めていません。"},
 
-    # The one line a person meets by choosing not to go on, and the only place here where the words
-    # are allowed to have any weather in them. Everything else in this file is a refusal this tool
-    # made -- a signature that does not match, a timestamp that is missing -- and a warning should
-    # read plainly, because atmosphere over a warning hides the warning. Declining is the person's
-    # own act, so it can sound like one.
-    "not_started": {"en": "The installation cannot be carried out at this moment.",
-                    "zh": "安装不能在这一刻进行。",
-                    "ja": "インストールは今この時点では行えません。"},
-    # The reply to yes. The game sets those two words in spaced capitals on a dark field; a console
-    # has no font to choose, but it has tracking and it has a frame, and between them that is most of
-    # what the line is. ASCII only, so it survives any code page -- a banner that arrives as question
-    # marks is worse than no banner.
+    "not_started": {"en": "The door cannot be opened from this side.",
+                    "zh": "门不能从这一侧打开。",
+                    "ja": "扉はこちら側から開けられません。"},
     "bonfire": {"en": "+-------------------------+\n"
                       "|  B O N F I R E   L I T  |\n"
                       "+-------------------------+",
@@ -107,11 +98,9 @@ PHRASES: dict[str, dict[str, str]] = {
                       "+-------------------------+"},
     "starting": {"en": "Starting the installer...", "zh": "正在启动安装程序…",
                  "ja": "取り付けを始めます…"},
-    # The closing line for a run that did not finish. Same register as declining: the thing could not
-    # be done, said plainly and once, rather than a stack of adjectives.
-    "signing_failed": {"en": "The signing could not be carried out.",
-                       "zh": "签名不能在这一刻完成。",
-                       "ja": "署名は今この時点では行えません。"},
+    "signing_failed": {"en": "The door cannot be opened from this side.",
+                       "zh": "门不能从这一侧打开。",
+                       "ja": "扉はこちら側から開けられません。"},
     "answered_cli": {"en": "   [answered on the command line]", "zh": "   [已在命令行上作答]",
                      "ja": "   [命令行で答えました]"},
     "answer_again": {"en": "Please answer Y or N.", "zh": "请回答 Y 或 N。",

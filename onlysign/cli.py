@@ -159,8 +159,6 @@ def _cmd_sign(args: argparse.Namespace) -> int:
     for line in workflow.describe_outcome(outcome):
         print(line)
 
-    # Flavour belongs where a person is reading. A pipe gets the facts and nothing else: a script
-    # parsing this has no use for a banner, and every reason not to have to skip past one.
     if notice.interactive():
         closing = phrases.table(getattr(args, "language", ""))
         print()
