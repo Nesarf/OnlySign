@@ -379,21 +379,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _looks_like_tar(path: str) -> bool:
-    """Whether this is a tar at all, asked of the first header rather than of the file's name.
-
-    `ustar` at offset 257 is the magic, and its presence is the file saying what it is. A tar with no
-    mark member has nothing else to recognise it by, and guessing from the extension would put the
-    answer in the filename, which is the one thing a reader is not allowed to trust.
-    """
-    try:
-        with open(path, "rb") as handle:
-            handle.seek(257)
-            return handle.read(5) in (b"ustar", b"ustar")
-    except OSError:
-        return False
-
-
 def _cmd_mark(args: argparse.Namespace) -> int:
     """Put a mark where there is nowhere to sign -- and refuse where there is.
 
@@ -449,24 +434,15 @@ def _cmd_mark(args: argparse.Namespace) -> int:
             failed += 1
             continue
         kind = pe.identify(path)
-        if pe.signable(kind):
-            print(f"{os.path.basename(path)}: {pe.describe(kind)} -- this format has a signature "
-                  f"slot, so it is signed rather than marked")
-            print("     a mark here would be a weaker claim beside a stronger one; put the "
-                  "attribution where the signature covers it (a certificate subject, a version "
-                  "resource) and sign the file")
+        carrier, word, work = marks.carrier_for(path, signable=pe.signable(kind))
+        if carrier == marks.KIND_SIGNED:
+            print(f"{os.path.basename(path)}: {pe.describe(kind)} -- {marks.REASON_SIGNED}")
+            print("     put the attribution where the signature covers it (a certificate "
+                  "subject, a version resource) and sign the file")
             refused += 1
             continue
-        if marks.zip_eocd_at(path) is not None:
-            carrier, work = "zip", marks.mark_zip
-        elif marks.tar_mark_offset(path) is not None or _looks_like_tar(path):
-            carrier, work = "tar", marks.mark_tar
-        elif marks.iso_app_use_offset(path) is not None:
-            carrier, work = "ISO", marks.mark_iso
-        else:
-            print(f"{os.path.basename(path)}: no carrier for this format yet -- a zip takes a "
-                  f"comment, a tar takes an appended member, an ISO takes its Application Use "
-                  f"field, and a boot sector takes the mark itself")
+        if work is None:
+            print(f"{os.path.basename(path)}: {marks.REASON_NO_CARRIER}")
             failed += 1
             continue
         try:

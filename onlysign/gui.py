@@ -26,6 +26,7 @@ Three things about language shape it too:
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import queue
@@ -34,11 +35,20 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from . import i18n
-from .engine import audit, certs, discover, pe, signer, trust, workflow
+from . import i18n, mark
+from .engine import (audit, bootmark, certs, discover, pe, signer, trust, workflow)
 
 WINDOW_TITLE = "OnlySign"
 SETTINGS_NAME = "gui.json"
+
+# The pages the window offers: the string key that names each one and the name it is known by inside
+# the code. One table rather than two lists, because two lists of the same length are two lists that
+# drift -- and the drift would be a page either named by a key nothing loads or built under a name
+# nothing selects. `--tabs` compares against this, so a page written and never added is a shortfall
+# rather than silence.
+TABS = (("tab.artifacts", "artifacts"), ("tab.signing", "signing"),
+        ("tab.trust", "trust"), ("tab.mark", "mark"))
+TAB_KEYS = tuple(key for key, _ in TABS)
 
 
 def make_dpi_aware() -> bool:
@@ -364,8 +374,7 @@ class Window:
         notebook.pack(fill="both", expand=True, padx=10, pady=(8, 0))
         self.notebook = notebook
         self.pages: dict[str, ttk.Frame] = {}
-        for key, name in (("tab.artifacts", "artifacts"), ("tab.signing", "signing"),
-                          ("tab.trust", "trust")):
+        for key, name in TABS:
             page = ttk.Frame(notebook, padding=10)
             notebook.add(page, text=self.t(i18n_key=key))
             self.pages[name] = page
@@ -483,6 +492,9 @@ class Window:
         self.widgets["trust_note"] = note
         self._describe_trust()
 
+        # where there is nowhere to sign
+        self._build_mark_page(self.pages["mark"], pad)
+
         # the buttons, and what happened
         actions = ttk.Frame(bottom)
         actions.pack(fill="x", pady=(10, 0))
@@ -510,6 +522,285 @@ class Window:
         self.report.tag_configure("good", foreground="#006000")
         self.report.tag_configure("quiet", foreground="#666666")
         self.report.tag_configure("key", foreground="#000080")
+
+    def _build_mark_page(self, page: ttk.Frame, pad: dict) -> None:
+        """The fourth page: attribution on the formats that have no signature slot.
+
+        This page decides nothing either. Which carrier applies to a file, whether the format is one
+        that should be signed instead, and whether a mark's digest still describes the file are all
+        asked of `mark` -- the same functions the `mark` verb calls. The one judgement the page makes
+        is layout, and the one thing it insists on is the identity: a mark is a claim of ownership, so
+        an empty one is refused here for the same reason the command line refuses it.
+        """
+        # what the page is for, said before anything can be pressed
+        scripted(page, self.t(i18n_key="mark.what_it_is"), self.language, foreground="#666",
+                 wraplength=980, justify="left").pack(fill="x")
+
+        target = ttk.LabelFrame(page, text=self.t(i18n_key="group.mark_target"), padding=8)
+        target.pack(fill="x", pady=(8, 0))
+        self.mark_file = tk.StringVar(value=self.settings.get("mark_file"))
+        self.mark_identity = tk.StringVar(
+            value=self.settings.get("mark_identity",
+                                    os.path.join(os.getcwd(), "IDENTITY.local.json")))
+        self.mark_year = tk.StringVar(value=self.settings.get("mark_year",
+                                                              str(datetime.date.today().year)))
+        rows = (("field.mark_file", self.mark_file, self._browse_mark_file),
+                ("field.mark_identity", self.mark_identity, self._browse_mark_identity))
+        for index, (key, variable, command) in enumerate(rows):
+            scripted(target, self.t(i18n_key=key), self.language).grid(
+                row=index, column=0, sticky="w", **pad)
+            ttk.Entry(target, textvariable=variable).grid(
+                row=index, column=1, sticky="ew", **pad)
+            ttk.Button(target, text=self.t(i18n_key="button.browse"), command=command).grid(
+                row=index, column=2, **pad)
+        scripted(target, self.t(i18n_key="field.mark_year"), self.language).grid(
+            row=2, column=0, sticky="w", **pad)
+        ttk.Entry(target, textvariable=self.mark_year, width=10).grid(
+            row=2, column=1, sticky="w", **pad)
+        target.columnconfigure(1, weight=1)
+
+        actions = ttk.Frame(page)
+        actions.pack(fill="x", pady=(8, 0))
+        self.mark_preview_button = ttk.Button(actions, text=self.t(i18n_key="button.preview"),
+                                              command=self.on_mark_preview)
+        self.mark_preview_button.pack(side="left")
+        self.mark_place_button = ttk.Button(actions, text=self.t(i18n_key="button.place"),
+                                            command=self.on_mark)
+        self.mark_place_button.pack(side="left", padx=8)
+        self.mark_read_button = ttk.Button(actions, text=self.t(i18n_key="button.read_mark"),
+                                           command=self.on_read_mark)
+        self.mark_read_button.pack(side="left")
+
+        # no file to mark, and the sector is the carrier itself
+        sector = ttk.LabelFrame(page, text=self.t(i18n_key="group.boot"), padding=8)
+        sector.pack(fill="x", pady=(8, 0))
+        self.boot_out = tk.StringVar(value=self.settings.get("boot_out"))
+        scripted(sector, self.t(i18n_key="field.boot_out"), self.language).grid(
+            row=0, column=0, sticky="w", **pad)
+        ttk.Entry(sector, textvariable=self.boot_out).grid(row=0, column=1, sticky="ew", **pad)
+        ttk.Button(sector, text=self.t(i18n_key="button.browse"),
+                   command=self._browse_boot_out).grid(row=0, column=2, **pad)
+        self.build_sector_button = ttk.Button(sector, text=self.t(i18n_key="button.build_sector"),
+                                              command=lambda: self.on_build_sector(False))
+        self.build_sector_button.grid(row=1, column=0, columnspan=2, sticky="w", **pad)
+        self.build_floppy_button = ttk.Button(sector, text=self.t(i18n_key="button.build_floppy"),
+                                              command=lambda: self.on_build_sector(True))
+        self.build_floppy_button.grid(row=2, column=0, columnspan=2, sticky="w", **pad)
+        scripted(sector, self.t(i18n_key="boot.why"), self.language, foreground="#666",
+                 wraplength=980, justify="left").grid(row=3, column=0, columnspan=3, sticky="w", **pad)
+        sector.columnconfigure(1, weight=1)
+
+        # The signing buttons belong to the signing page, and leaving them live on this one would
+        # offer an action that has nothing to do with what is on screen. They are switched off when
+        # this page is the one showing, and back on when it is not -- see `_on_tab_changed`.
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+
+    def _on_tab_changed(self, _event=None) -> None:
+        """Keep the signing buttons to their own page, and the marking buttons to theirs.
+
+        Guarded, because Tk can deliver this while the pages are still being built: `_apply_language`
+        selects a page and the event arrives before every page exists, and a handler that assumed a
+        finished window would take the whole window down on a language switch.
+        """
+        if not hasattr(self, "notebook") or "mark" not in getattr(self, "pages", {}):
+            return
+        if not hasattr(self, "mark_place_button"):
+            return
+        if not self.busy:
+            self._set_buttons("normal")
+
+    def _set_buttons(self, state: str) -> None:
+        """Every action button, and which page it belongs to.
+
+        One place, because the alternative is the state of a button depending on which of two
+        functions last touched it -- and the sibling verb is the one that gets forgotten when a new
+        button is added.
+        """
+        on_mark = self.notebook.index("current") == self.notebook.index(self.pages["mark"])
+        for button in (self.dry_button, self.sign_button, self.check_button):
+            button.configure(state="disabled" if (state == "disabled" or on_mark) else "normal")
+        for button in (self.mark_preview_button, self.mark_place_button, self.mark_read_button,
+                       self.build_sector_button, self.build_floppy_button):
+            button.configure(state="disabled" if (state == "disabled" or not on_mark) else "normal")
+
+    # --- marking -------------------------------------------------------------- #
+
+    def _browse_mark_file(self) -> None:
+        chosen = filedialog.askopenfilename(title=self.t(i18n_key="pick.mark_file"))
+        if chosen:
+            self.mark_file.set(chosen)
+
+    def _browse_mark_identity(self) -> None:
+        chosen = filedialog.askopenfilename(title=self.t(i18n_key="pick.mark_identity"),
+                                            filetypes=[("JSON", "*.json"), ("all files", "*.*")])
+        if chosen:
+            self.mark_identity.set(chosen)
+
+    def _browse_boot_out(self) -> None:
+        chosen = filedialog.asksaveasfilename(title=self.t(i18n_key="pick.mark_out"))
+        if chosen:
+            self.boot_out.set(chosen)
+
+    def _mark_names(self) -> tuple[str, list[str]]:
+        """Who the mark belongs to, read from a file -- and nothing invented when it is absent.
+
+        A mark that fills in a name it was not given is not a mark, so this refuses rather than
+        falling back to anything, which is what the command line does with the same function.
+        """
+        where = self.mark_identity.get().strip()
+        if not where:
+            self.say(self.t(i18n_key="say.mark_no_identity"), "bad")
+            return "", []
+        try:
+            primary, secondary = mark.names_from(where)
+        except ValueError as exc:
+            self.say(self.t(i18n_key="say.mark_failed", error=exc), "bad")
+            return "", []
+        if not primary:
+            self.say(self.t(i18n_key="say.mark_failed", error=where), "bad")
+        return primary, secondary
+
+    def _say_the_verdict(self, path: str) -> tuple[str, object | None]:
+        """What this file is, which carrier it takes, and the writer -- all from `mark`."""
+        if not os.path.isfile(path):
+            self.say(self.t(i18n_key="say.mark_failed", error=path), "bad")
+            return "", None
+        kind = pe.identify(path)
+        carrier, word, work = mark.carrier_for(path, signable=pe.signable(kind))
+        if carrier == mark.KIND_SIGNED:
+            self.say(self.t(i18n_key="say.mark_carrier",
+                            carrier=self.t(i18n_key="carrier.signed")), "bad")
+            self.say("     " + pe.describe(kind))
+            return carrier, None
+        if work is None:
+            self.say(self.t(i18n_key="say.mark_carrier",
+                            carrier=self.t(i18n_key="carrier.no-carrier")), "bad")
+            return carrier, None
+        self.say(self.t(i18n_key="say.mark_carrier",
+                        carrier=self.t(i18n_key="carrier." + word)), "key")
+        return carrier, work
+
+    def on_mark_preview(self) -> None:
+        """What would be written, and where -- with nothing written."""
+        path = self.mark_file.get().strip()
+        primary, secondary = self._mark_names()
+        if not primary:
+            return
+        self.clear_report()
+        self.say(self.t(i18n_key="say.mark_preview"), "quiet")
+        carrier, work = self._say_the_verdict(path)
+        if work is None:
+            return
+        body = mark.mark_line(primary=primary, secondary=secondary, year=self.mark_year.get().strip(),
+                              kind="placeholder")
+        self.say("     " + body, "quiet")
+        self.say(self.t(i18n_key="say.mark_digest", digest=self.t(i18n_key="say.mark_no_digest")),
+                 "quiet")
+
+    def on_mark(self) -> None:
+        path = self.mark_file.get().strip()
+        primary, secondary = self._mark_names()
+        if not primary:
+            return
+        self.clear_report()
+        carrier, work = self._say_the_verdict(path)
+        if work is None:
+            return
+        year = self.mark_year.get().strip()
+
+        def placing():
+            return work(path, primary=primary, secondary=secondary, year=year, digest=True)
+
+        def done(payload):
+            self._finish(payload)
+            kind, value = payload
+            if kind == "failed":
+                self.say(self.t(i18n_key="say.mark_failed", error=value), "bad")
+                return
+            self._say_a_mark(value)
+
+        self._run(placing, done)
+
+    def _say_a_mark(self, written: dict) -> None:
+        """One mark, as it was written, plus what reading it back says about the file."""
+        self.mark_file.set(written.get("path", self.mark_file.get()))
+        self.say(self.t(i18n_key="say.mark_placed"), "good")
+        self.say("     " + written.get("line", ""))
+        if written.get("digest"):
+            self.say(self.t(i18n_key="say.mark_digest", digest=written["digest"]), "quiet")
+        else:
+            self.say(self.t(i18n_key="say.mark_no_digest"), "quiet")
+        self.say(self.t(i18n_key="say.mark_strength",
+                        strength=self.t(i18n_key="mark.strength." + written.get("kind", ""))), "quiet")
+        # Reading it back is not ceremony: the carrier wrote it, and whether the same bytes come out
+        # again is the only thing that says the write landed where a reader will look.
+        read = self._read_mark(written.get("path", ""))
+        if read:
+            self._say_what_came_back(read)
+
+    def _read_mark(self, path: str) -> dict | None:
+        if not path or not os.path.isfile(path):
+            return None
+        if mark.zip_eocd_at(path) is not None:
+            return mark.read_zip_mark(path)
+        if mark.tar_mark_offset(path) is not None or mark.looks_like_tar(path):
+            return mark.read_tar_mark(path)
+        if mark.iso_app_use_offset(path) is not None:
+            return mark.read_iso_mark(path)
+        return None
+
+    def _say_what_came_back(self, found: dict) -> None:
+        if not found.get("marked"):
+            self.say(self.t(i18n_key="say.mark_none"), "bad")
+            return
+        self.say(self.t(i18n_key="say.mark_read"), "key")
+        self.say("     " + found.get("raw", ""))
+        if found.get("sha256"):
+            agrees = bool(found.get("digest_matches"))
+            self.say(self.t(i18n_key="say.mark_agrees" if agrees else "say.mark_disagrees"),
+                     "good" if agrees else "bad")
+
+    def on_read_mark(self) -> None:
+        path = self.mark_file.get().strip()
+        self.clear_report()
+        found = self._read_mark(path)
+        if found is None:
+            self.say(self.t(i18n_key="say.mark_unreadable"), "bad")
+            return
+        self._say_what_came_back(found)
+
+    def on_build_sector(self, floppy: bool) -> None:
+        """The mark itself, in 512 bytes, for when there is no file to carry it."""
+        out = self.boot_out.get().strip()
+        primary, secondary = self._mark_names()
+        if not primary:
+            return
+        if not out:
+            self.say(self.t(i18n_key="say.mark_failed", error=self.t(i18n_key="field.boot_out")), "bad")
+            return
+        self.clear_report()
+        body = mark.mark_line(primary=primary, secondary=secondary, year=self.mark_year.get().strip(),
+                              kind="boot-sector")
+
+        def building():
+            size = (bootmark.write_image(out, body) if floppy else bootmark.write(out, body))
+            return {"path": out, "size": size, "line": body, "floppy": floppy}
+
+        def done(payload):
+            self._finish(payload)
+            kind, value = payload
+            if kind == "failed":
+                self.say(self.t(i18n_key="say.mark_failed", error=value), "bad")
+                return
+            what = self.t(i18n_key="carrier.boot sector in a 1.44 MB image" if value["floppy"]
+                          else "carrier.boot sector")
+            self.say(self.t(i18n_key="say.mark_boot", path=value["path"], size=value["size"],
+                            what=what), "good")
+            self.say("     " + value["line"])
+            self.say(self.t(i18n_key="say.mark_strength",
+                            strength=self.t(i18n_key="mark.strength.boot-sector")), "quiet")
+
+        self._run(building, done)
 
     # --- small helpers -------------------------------------------------------- #
 
@@ -575,10 +866,6 @@ class Window:
         self.busy = False
         self._set_buttons("normal")
         self.status.configure(text=self.t(i18n_key="status.ready"))
-
-    def _set_buttons(self, state: str) -> None:
-        for button in (self.dry_button, self.sign_button, self.check_button):
-            button.configure(state=state)
 
     # --- the certificate ------------------------------------------------------ #
 
@@ -865,7 +1152,11 @@ class Window:
                               ("ledger", getattr(self, "ledger", None)),
                               ("authorities", getattr(self, "authorities", None)),
                               ("repo", getattr(self, "repo", None)),
-                              ("artifacts", getattr(self, "artifacts", None))):
+                              ("artifacts", getattr(self, "artifacts", None)),
+                              ("mark_file", getattr(self, "mark_file", None)),
+                              ("mark_identity", getattr(self, "mark_identity", None)),
+                              ("mark_year", getattr(self, "mark_year", None)),
+                              ("boot_out", getattr(self, "boot_out", None))):
             if variable is not None:
                 self.settings.put(key, variable.get())
         self.settings.save()
@@ -956,6 +1247,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="onlysign-gui", description="The OnlySign window.")
     parser.add_argument("--check", action="store_true",
                         help="build the window and close it again, to prove it can be built")
+    parser.add_argument("--tabs", action="store_true",
+                        help="print the pages the window offers, so a built executable can be "
+                             "asked what is inside it rather than assumed to carry it")
     parser.add_argument("--settings", default="", help="where the window remembers things")
     parser.add_argument("--lang", default="", help="zh, en or ja")
     args = parser.parse_args(argv)
@@ -971,6 +1265,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no display is available, so the window cannot open: {exc}")
         return 1
     window = Window(root, settings)
+    if args.tabs:
+        # Asked of the window, not read off this file: a page that was written and never added to
+        # the notebook is a page nobody can reach, and that is exactly what a build log cannot see.
+        # The wording of the names is the window's language, so what is compared is the count and
+        # which page sits where -- the keys, not the words.
+        root.update_idletasks()
+        found = [window.notebook.tab(index, "text")
+                 for index in range(window.notebook.index("end"))]
+        expected = [window.t(i18n_key=key) for key in TAB_KEYS]
+        root.destroy()
+        print(f"the window offers {len(found)} page(s): " + ", ".join(found))
+        print("expected, in this language: " + ", ".join(expected))
+        if len(found) != len(expected):
+            print(f"missing: expected {len(expected)} page(s), found {len(found)}")
+            return 1
+        return 0
     if args.check:
         # Prove the window in every language it claims to speak, not just the one it opens in, and
         # prove the About window can find its mark -- a picture that silently goes missing in a
@@ -979,11 +1289,13 @@ def main(argv: list[str] | None = None) -> int:
             window._apply_language(code)
             root.update_idletasks()
         root.update_idletasks()
-        mark = window._about_mark(root)
-        picture = (f"{mark.image.width()}x{mark.image.height()}" if mark is not None
+        art = window._about_mark(root)
+        picture = (f"{art.image.width()}x{art.image.height()}" if art is not None
                    else "absent, and the About window goes without it")
+        pages = [window.notebook.tab(index, "text") for index in range(window.notebook.index("end"))]
         root.destroy()
         print(f"the window was built, switched language twice, and closed; mark {picture}")
+        print("pages: " + ", ".join(pages))
         return 0
     root.mainloop()
     return 0

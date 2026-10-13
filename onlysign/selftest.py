@@ -30,6 +30,8 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from onlysign import gui as gui_module  # noqa: E402
+from onlysign import i18n  # noqa: E402
 from onlysign import mark  # noqa: E402
 from onlysign import notice as notice_module  # noqa: E402
 from onlysign.engine import (  # noqa: E402
@@ -1154,6 +1156,42 @@ def main() -> int:
         truthy("no identity" in said, f"the refusal does not say why: {said!r}")
         falsy(mark.zip_comment(str(target)), "a mark was written with no identity configured")
 
+    def one_decision_about_which_carrier_applies():
+        # Which carrier a file takes is a judgement, and a judgement made twice is two judgements:
+        # the window and the command line would drift and the drift would be silent -- one marking a
+        # file as a zip while the other called it unmarkable. So the decision is asked, once. This is
+        # the check that would notice a second copy of it appearing, in the one place it was copied
+        # to first.
+        import re
+        from onlysign import cli as cli_module
+        index = Path(cli_module.__file__).read_text(encoding="utf-8")
+        truthy("marks.carrier_for(" in index,
+               "the command line does not ask which carrier applies, so it decides for itself")
+        for name in ("zip_eocd_at", "tar_mark_offset", "iso_app_use_offset"):
+            falsy(re.search(rf"^\s*(el)?if\w*.*{name}\(", index, re.MULTILINE),
+                  f"the command line decides for itself again, with {name}")
+        # The window has the same rule, and the difference matters more there: a window that decided
+        # for itself would be the only place a person could see the answer without a terminal.
+        window = Path(gui_module.__file__).read_text(encoding="utf-8")
+        truthy("mark.carrier_for(" in window, "the window decides for itself which carrier applies")
+
+        # And the decision itself, on every carrier there is plus the one that is refused.
+        def carrier_of(path):
+            kind = pe.identify(str(path))
+            return mark.carrier_for(str(path), signable=pe.signable(kind))[0]
+
+        same(carrier_of(mark_work / "marked.zip"), mark.KIND_ZIP, "the carrier of a zip")
+        same(carrier_of(mark_work / "marked.tar"), mark.KIND_TAR, "the carrier of a tar")
+        iso = mark_work / "marked.iso"
+        if iso.exists():
+            same(carrier_of(iso), mark.KIND_ISO, "the carrier of an ISO")
+        signable = mark_work / "signable.exe"
+        if signable.exists():
+            same(carrier_of(signable), mark.KIND_SIGNED, "the carrier of a format that is signed")
+        not_a_carrier = mark_work / "nothing.bin"
+        not_a_carrier.write_bytes(b"not any of the formats this tool knows")
+        same(carrier_of(not_a_carrier), mark.KIND_NO_CARRIER, "the carrier of an unknown format")
+
     check("a zip carries the mark and its digest guards the archive",
           a_zip_carries_the_mark_and_the_digest_guards_it)
     check("a tar carries the mark as a member", a_tar_carries_the_mark_as_a_member)
@@ -1162,8 +1200,34 @@ def main() -> int:
     check("a format that can be signed is refused", a_format_that_can_be_signed_is_refused)
     check("the mark command writes a boot sector", the_mark_command_writes_a_boot_sector)
     check("no identity means no mark", no_identity_means_no_mark)
+    check("which carrier applies is decided in one place",
+          one_decision_about_which_carrier_applies)
     check("every verb the command line offers reaches the executable",
           every_verb_the_command_line_offers_is_reachable)
+
+    # --- the window's structure, without needing a display -------------------- #
+    print()
+    print("what the window says it offers")
+
+    def every_tab_string_names_a_declared_page():
+        # A missing page is invisible from inside the window: `--tabs` catches a page that was
+        # written and never added, but it cannot catch a page whose name is a key nothing loads,
+        # because the notebook would simply show the key itself. This is the other half, and it does
+        # not need a display -- which matters, since the window cannot be opened everywhere the
+        # self-test runs.
+        keys = [key for key in i18n.STRINGS if key.startswith("tab.")]
+        same(sorted(keys), sorted(gui_module.TAB_KEYS),
+             "the tab strings the table defines against the pages the window declares")
+        for key in gui_module.TAB_KEYS:
+            for language in i18n.LANGUAGES:
+                text = i18n.translate(key, language)
+                truthy(text and text != key,
+                       f"the page {key} has no name in {language}, so the notebook would show the key")
+        names = [name for _, name in gui_module.TABS]
+        same(len(names), len(set(names)), "the page names inside the code are unique")
+
+    check("every tab string names a page, in every language",
+          every_tab_string_names_a_declared_page)
 
     # --- cleaning up after itself --------------------------------------------- #
     if throwaway is not None:

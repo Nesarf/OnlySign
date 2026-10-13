@@ -34,9 +34,9 @@ From a checkout, without building anything:
 ```powershell
 python -m onlysign.gui                          # the window
 python OnlySign.py                              # the same window, through the packaged entry point
-python -m onlysign selftest                     # run the engine against itself: 49 checks
+python -m onlysign selftest                     # run the engine against itself: 51 checks
 python -m onlysign selftest --keep              # leave the scratch directory behind to look at
-python tools/gui_smoke.py                       # drive the window the way a person would: 6 checks
+python tools/gui_smoke.py                       # drive the window the way a person would: 13 checks
 
 python -m onlysign scan  <project>              # propose artifacts, with the reason for each
 python -m onlysign certs                        # what could sign
@@ -45,6 +45,7 @@ python -m onlysign sign  <file>... --cert <name> --dry-run
 python -m onlysign sign  --repo <project> --cert <name> --ledger .onlysign\signings.ndjson
 python -m onlysign check --ledger .onlysign\signings.ndjson
 python -m onlysign trust --cert <name> [--install user-root]
+python -m onlysign mark  <file>... --identity IDENTITY.local.json
 ```
 
 `--cert` takes a full thumbprint, an unambiguous prefix of one, or part of a subject; an ambiguous
@@ -70,8 +71,23 @@ Artifact directory[_______________] [Browse]      given one, the scan takes it a
 Certificate     [ a code signing certificate with a private key, showing expiry ]
 Signing           note, where signed copies go, where the record goes, timestamp authorities
 Trust           ○ none  ○ user: publishers  ○ user: root  ○ machine: both
+Mark              a file, an identity file naming who the mark belongs to, a year
+                  [Preview] [Place the mark] [Read the mark back]
+                  and, for when there is no file to carry it, a 512-byte sector or a floppy image
 [Dry run] [Execute signing] [Check the ledger]
 ```
+
+The `Mark` page decides nothing either, and there is less room for it to: which carrier applies to a
+file, whether the format is one that should be signed instead, and whether a mark's digest still
+describes the file are all asked of one function, `mark.carrier_for`, which is the same one the
+`mark` verb calls. That decision used to live in the command line, and moving it here is what keeps a
+file from being a zip to one door and unmarkable to the other. The one thing the page insists on is
+the identity: a mark says whose it is, so an empty identity refuses rather than inventing a name.
+
+The signing buttons are switched off while the `Mark` page is showing, and back on when it is not.
+That is not decoration -- an action whose result would appear on a page the person is not looking at
+is an action that gets pressed by mistake. `tools/gui_smoke.py` walks both pages and checks that the
+buttons follow.
 
 Signing and installing trust are two groups rather than one list of options on purpose, and that is
 the point most easily got wrong: a trust store decides what **this machine** accepts, and it is not
@@ -93,13 +109,28 @@ every action cannot be one scroll away from where they are looking.
 `tools/gui_smoke.py` exists so this claim is tested rather than asserted: it opens the real window,
 fills in the real fields, presses the real buttons, and then reads the ledger the window wrote.
 
+**A built executable can be asked what is inside it**, which is not the same as having been rebuilt:
+one build carried a verb its entry point could not reach and looked exactly like a successful one.
+
+```
+OnlySign.exe --tabs     the pages the window offers, and how many were expected
+OnlySign.exe --check    builds the window, switches language twice, closes it
+```
+
+`--tabs` reads the names out of the notebook rather than out of this file, so a page that was written
+and never added shows up as a shortfall rather than as silence.
+
 ## Building the executable
 
 ```powershell
-python tools/build.py                       # the window, no console
-python tools/build.py --console             # the same, but with a console -- the one that can be checked
-python tools/build.py --icon path\to.ico    # a different icon than the one that ships
+python tools/build.py                                    # dist/OnlySign.exe, the window
+python tools/build.py --console --name OnlySign-console   # dist/OnlySign-console.exe, checkable
+python tools/build.py --icon path\to.ico                 # a different icon than the one that ships
 ```
+
+`--console` does **not** change the output name, so the second build has to say what it is called:
+run without `--name` it writes `OnlySign.exe` again and replaces the windowed build with a console
+one, which is a mistake that looks exactly like success until somebody double-clicks it.
 
 One file, about 13 MB, no runtime to install. `--python` points at the interpreter that has
 PyInstaller, which is a dependency of *building* the tool and not of using it. The work directory
@@ -107,7 +138,9 @@ goes to the system temp area, because a build leaves a great deal behind that no
 source tree. The build uses `mark/onlysign.ico`; `--no-icon` leaves it off.
 
 The packaged binary has two doors: started with no arguments it opens the window, started with a
-command (`scan`, `certs`, `sign`, `check`, `trust`) it behaves like the command line. That is what
+command (`scan`, `certs`, `sign`, `check`, `trust`, `mark`) it behaves like the command line -- and
+the list it dispatches on is read from the parser, because a hand-kept copy of it fell one verb
+behind the first time a verb was added. That is what
 makes it testable -- an executable that only opens a window is one that cannot be checked from a
 script. Note that a one-file build starts a bootloader which then starts the real process, so the
 process id you get from launching it is not the one that owns the window.
@@ -227,9 +260,9 @@ onlysign/engine/bootmark.py  a mark in 512 bytes, for the machines that cannot v
 onlysign/mark.py             the mark line, and the carriers the verb puts it in
 onlysign/gui.py              the window; layout and a worker thread, nothing else
 onlysign/cli.py              the engine with a keyboard instead of a window
-onlysign/selftest.py         49 checks of the engine, in a scratch directory
+onlysign/selftest.py         51 checks of the engine, in a scratch directory
 tools/build.py               building the one-file executable
-tools/gui_smoke.py           6 checks that drive the window itself
+tools/gui_smoke.py           13 checks that drive the window itself
 tools/cfb-probe.py           what a compound file's header says, against what the reader returned
 tools/boot-check.py          boots the mark sector on real firmware (needs QEMU; not a check)
 dist/                        built executables (not committed)
@@ -284,6 +317,13 @@ python -m onlysign mark --floppy boot.img --identity IDENTITY.local.json   # for
 The identity is required rather than defaulted, and that is the one rule the command enforces
 hardest: a mark is a claim of ownership, so it is an input and never a constant. A tool that invents
 a name to put in a copyright line has done the thing a mark must not do.
+
+**Which carrier applies is one decision, in one place.** `mark.carrier_for(path, signable=...)`
+answers it -- zip, tar, ISO, refused, or no carrier yet -- and both doors ask it. It used to be a
+chain of `if`s in the command line, which was fine while the command line was the only door; the
+window made it a second implementation waiting to happen, and a file that is a zip to one door and
+unmarkable to the other is the failure that would not be visible from either. `mark.looks_like_tar`
+moved there with it, and the self-test checks that the command line no longer decides for itself.
 
 **A digest inside a zip comment cannot describe the file that contains it.** The comment is part of
 the archive, so the value would have to depend on itself, and any number written there would be
@@ -365,9 +405,9 @@ Built and checked at every level:
 
 | what | how it is checked |
 |---|---|
-| the engine | `python -m onlysign selftest` -- 49 checks, in a scratch directory |
-| the window | `python tools/gui_smoke.py` -- 6 checks that open it and press its buttons |
-| both PowerShell editions | the same 49 checks under Windows PowerShell and under PowerShell 7 |
+| the engine | `python -m onlysign selftest` -- 51 checks, in a scratch directory |
+| the window | `python tools/gui_smoke.py` -- 13 checks that open it and press its buttons |
+| both PowerShell editions | the same 51 checks under Windows PowerShell and under PowerShell 7 |
 | the executable | about 13 MB, one file: lists certificates, answers `scan --help`, opens its window |
 | reading a container | `python tools/cfb-probe.py <dir>` -- every compound file in it, against its own header |
 

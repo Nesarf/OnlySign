@@ -259,6 +259,118 @@ STRINGS: dict[str, dict[str, str]] = {
     "tab.artifacts": {"zh": "产物", "en": "Artifacts", "ja": "成果物"},
     "tab.signing": {"zh": "签名设置", "en": "Signing", "ja": "署名の設定"},
     "tab.trust": {"zh": "本机信任", "en": "Trust", "ja": "この端末の信頼"},
+    "tab.mark": {"zh": "标记", "en": "Mark", "ja": "印"},
+
+    # marking: for the formats that have nowhere to sign. The window decides nothing here either --
+    # which carrier applies is asked of the same function the command line asks.
+    "group.mark_target": {"zh": "打标记的对象", "en": "What to mark", "ja": "印を打つ相手"},
+    "field.mark_file": {"zh": "文件", "en": "File", "ja": "ファイル"},
+    "field.mark_identity": {"zh": "身份文件（写明标记归属谁）",
+                            "en": "Identity file (naming who the mark belongs to)",
+                            "ja": "発行元のファイル（印が誰のものかを書いたもの）"},
+    "field.mark_year": {"zh": "年份（可留空）", "en": "Year (may be left empty)", "ja": "年（空でも構いません）"},
+    "pick.mark_file": {"zh": "要打标记的文件", "en": "The file to mark", "ja": "印を打つファイル"},
+    "pick.mark_identity": {"zh": "写明标记归属的身份文件",
+                           "en": "The identity file naming who the mark belongs to",
+                           "ja": "印が誰のものかを書いたファイル"},
+    "pick.mark_out": {"zh": "写到哪里", "en": "Where to write it", "ja": "どこに書きますか"},
+    "button.preview": {"zh": "预览", "en": "Preview", "ja": "下見"},
+    "button.place": {"zh": "打标记", "en": "Place the mark", "ja": "印を打つ"},
+    "button.read_mark": {"zh": "读回标记", "en": "Read the mark back", "ja": "印を読み直す"},
+    "mark.what_it_is": {
+        "zh": "标记不需要密码学，只需要一个日后还在的地方。它说的是「这是谁的」，"
+              "签名说的是「谁为这些字节作保」。有签名槽位的格式要签名，不打标记。",
+        "en": "A mark needs no cryptography, only somewhere the text will still be later. It answers "
+              "who says this is theirs; a signature answers who vouches for these bytes. A format "
+              "with a signature slot is signed, not marked.",
+        "ja": "印に暗号はいりません。あとになっても残る場所があれば足ります。印は「これは誰のものか」を、"
+              "署名は「このバイトを誰が保証するか」を答えます。署名を入れる場所のある形には署名し、印は打ちません。"},
+
+    "group.boot": {"zh": "引导扇区（没有文件可标记时）",
+                   "en": "A boot sector (when there is no file to mark)",
+                   "ja": "起動の記録（印を打つファイルが無いとき）"},
+    "field.boot_out": {"zh": "写到", "en": "Write to", "ja": "書き出し先"},
+    "button.build_sector": {"zh": "做一个 512 字节的扇区", "en": "Build a 512-byte sector",
+                            "ja": "512 バイトの記録を作る"},
+    "button.build_floppy": {"zh": "做一个 1.44 MB 软盘映像", "en": "Build a 1.44 MB floppy image",
+                            "ja": "1.44 MB の記録を作る"},
+    "boot.why": {
+        "zh": "扇区本身就是载体——没有文件可标时，标记就是它的全部内容。",
+        "en": "The sector is the carrier itself: with no file to mark, the mark is all there is.",
+        "ja": "記録そのものが載せ先です。印を打つファイルが無いときは、印だけが中身になります。"},
+
+    "say.mark_checking": {"zh": "正在看 {where} …", "en": "looking at {where} ...",
+                          "ja": "{where} を見ています…"},
+    "say.mark_failed": {"zh": "没做成：{error}", "en": "that did not work: {error}",
+                        "ja": "できませんでした：{error}"},
+    "say.mark_no_identity": {
+        "zh": "请先指定身份文件——标记说的就是「这是谁的」，编一个名字是它唯一不能做的事。",
+        "en": "Name an identity file first: a mark says whose it is, and inventing a name is the "
+              "one thing a mark must not do.",
+        "ja": "先に発行元のファイルを指定してください。印は「誰のものか」を言うもので、"
+              "名前を作ってしまうことだけはできません。"},
+    "say.mark_preview": {"zh": "预览——不会写任何东西：", "en": "preview -- nothing will be written:",
+                         "ja": "下見 —— 何も書きません："},
+    "say.mark_placed": {"zh": "已打上标记：", "en": "the mark is on:", "ja": "印を打ちました："},
+    "say.mark_read": {"zh": "读回的标记：", "en": "what the file says:", "ja": "読み直した印："},
+    "say.mark_none": {"zh": "这个文件上没有标记。", "en": "there is no mark on this file.",
+                      "ja": "このファイルには印がありません。"},
+    "say.mark_unreadable": {
+        "zh": "这个格式读不出标记（能打的三种是 zip 的注释、tar 追加的成员、ISO 的应用区）。",
+        "en": "this format carries no mark this tool can read (a zip comment, an appended tar "
+              "member and an ISO's Application Use field are the three it places).",
+        "ja": "この形からは印を読み出せません（印を載せられるのは zip の注記、tar に足す項目、"
+              "ISO の応用領域の三つです）。"},
+    "say.mark_strength": {"zh": "强度：{strength}", "en": "strength: {strength}", "ja": "強さ：{strength}"},
+    "say.mark_carrier": {"zh": "载体：{carrier}", "en": "carrier: {carrier}", "ja": "載せ先：{carrier}"},
+    "say.mark_digest": {"zh": "摘要：{digest}", "en": "digest: {digest}", "ja": "要約：{digest}"},
+    "say.mark_no_digest": {"zh": "摘要：没有（标记仍然算数，但说明不了文件没被改过）",
+                           "en": "digest: none (the mark still stands, but it cannot say the file "
+                                 "went unaltered)",
+                           "ja": "要約：無し（印は有効ですが、変わっていないことは示せません）"},
+    "say.mark_wrote": {"zh": "写下 {size} 字节：{path}", "en": "wrote {size} byte(s): {path}",
+                       "ja": "{size} バイトを書き出しました：{path}"},
+    "say.mark_agrees": {"zh": "  摘要与文件一致——标记之后没有被动过。",
+                        "en": "  the digest agrees with the file -- nothing has touched it since",
+                        "ja": "  要約とファイルが一致しています。印のあと何も変わっていません。"},
+    "say.mark_disagrees": {"zh": "  摘要对不上——标记之后文件变过。",
+                           "en": "  the digest does NOT agree -- the file changed after it was marked",
+                           "ja": "  要約が一致しません。印を打ったあとにファイルが変わっています。"},
+    "say.mark_boot": {"zh": "扇区做好：{path}（{size} 字节，{what}）",
+                      "en": "the sector is built: {path} ({size} bytes, {what})",
+                      "ja": "記録を作りました：{path}（{size} バイト、{what}）"},
+
+    # what the window calls a carrier, and why one was refused or is missing. The engine says these
+    # in English, in one language, because a script reads that answer; the window says them here.
+    "carrier.zip": {"zh": "zip 的注释", "en": "a zip comment", "ja": "zip の注記"},
+    "carrier.tar": {"zh": "tar 追加的成员", "en": "an appended tar member", "ja": "tar に足す項目"},
+    "carrier.ISO": {"zh": "ISO 的应用区", "en": "an ISO's Application Use field",
+                    "ja": "ISO の応用領域"},
+    "carrier.boot sector": {"zh": "扇区本身", "en": "the sector itself", "ja": "記録そのもの"},
+    "carrier.boot sector in a 1.44 MB image": {
+        "zh": "1.44 MB 映像里的扇区", "en": "a sector in a 1.44 MB image",
+        "ja": "1.44 MB の記録の中の扇区"},
+    "carrier.signed": {"zh": "有签名槽位——该签名，不打标记",
+                       "en": "it has a signature slot -- sign it instead",
+                       "ja": "署名を入れる場所があります。印ではなく署名をしてください"},
+    "carrier.no-carrier": {
+        "zh": "这个格式还没有载体（现在能打的是 zip 的注释、tar 追加的成员、ISO 的应用区）",
+        "en": "no carrier for this format yet (a zip comment, an appended tar member and an ISO's "
+              "Application Use field are the three there are)",
+        "ja": "この形にはまだ載せ先がありません（今あるのは zip の注記、tar に足す項目、"
+              "ISO の応用領域の三つです）"},
+    "mark.strength.hash-record": {
+        "zh": "带着摘要，所以它同时说明了「谁主张」和「有没有被动过」",
+        "en": "it carries a digest, so it says both who claims it and whether it has been touched",
+        "ja": "要約が付いているので、誰のものかと、変わっていないかの両方を示します"},
+    "mark.strength.visibility": {
+        "zh": "只是可见——谁都能写这几个字节，也没有东西为它作保",
+        "en": "visibility only -- anyone can write these bytes and nothing vouches for them",
+        "ja": "見えるだけです。誰でもこのバイトを書けますし、保証するものはありません"},
+    "mark.strength.boot-sector": {
+        "zh": "只是可见——任何东西都能改写这 512 个字节",
+        "en": "visibility only -- anything can rewrite these 512 bytes",
+        "ja": "見えるだけです。この 512 バイトは何でも書き換えられます"},
 
     # language menu is listed in its own words
     "lang.current_suffix": {"zh": "（当前）", "en": " (current)", "ja": "（現在）"},

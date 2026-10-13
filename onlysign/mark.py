@@ -483,3 +483,69 @@ def read_iso_mark(path: str) -> dict:
     if found.get("sha256"):
         found["digest_matches"] = found["sha256"] == iso_body_digest(path)
     return found
+
+
+# --- which carrier a file takes ------------------------------------------------ #
+#
+# Deciding which carrier applies is a judgement, and a judgement made in two places is two
+# judgements: the window and the command line would drift, and the drift would be silent -- a file
+# marked as a zip by one and refused as unmarkable by the other. So the decision lives here, once,
+# and both of them ask. `kind` and `description` arrive from the caller rather than being imported,
+# because the file-format reader is the engine's and this module is not in it.
+
+KIND_ZIP = "zip"
+KIND_TAR = "tar"
+KIND_ISO = "iso"
+KIND_SIGNED = "signed"
+KIND_NO_CARRIER = "no-carrier"
+
+CARRIERS: dict[str, tuple[str, object]] = {
+    KIND_ZIP: ("zip", mark_zip),
+    KIND_TAR: ("tar", mark_tar),
+    KIND_ISO: ("ISO", mark_iso),
+}
+
+# Said in one language, because the command line prints it and a script reads that answer. The
+# window says the same thing in its own language, from the same code -- see i18n's `carrier.*`.
+REASON_SIGNED = ("this format has a signature slot, so it is signed rather than marked; a mark here "
+                 "would be a weaker claim beside a stronger one")
+REASON_NO_CARRIER = ("no carrier for this format yet -- a zip takes a comment, a tar takes an "
+                     "appended member, an ISO takes its Application Use field, and a boot sector "
+                     "takes the mark itself")
+
+
+def looks_like_tar(path: str) -> bool:
+    """Whether this is a tar at all, asked of the first header rather than of the file's name.
+
+    `ustar` at offset 257 is the magic, and its presence is the file saying what it is. A tar with no
+    mark member has nothing else to recognise it by, and guessing from the extension would put the
+    answer in the filename, which is the one thing a reader is not allowed to trust.
+    """
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(257)
+            return handle.read(5) == b"ustar"
+    except OSError:
+        return False
+
+
+def carrier_for(path: str, *, signable: bool = False) -> tuple[str, str, object | None]:
+    """Which carrier this file takes: a kind, the word for it, and the function that writes it.
+
+    Returns ``KIND_SIGNED`` or ``KIND_NO_CARRIER`` with no writer rather than raising, because both
+    are answers. A format with a signature slot is *refused*, which is the design and not a gap: the
+    attribution belongs where the signature covers it. A format with no carrier yet is a gap, and it
+    says which carriers exist so the next one is obvious.
+    """
+    if signable:
+        return KIND_SIGNED, "", None
+    if zip_eocd_at(path) is not None:
+        kind = KIND_ZIP
+    elif tar_mark_offset(path) is not None or looks_like_tar(path):
+        kind = KIND_TAR
+    elif iso_app_use_offset(path) is not None:
+        kind = KIND_ISO
+    else:
+        return KIND_NO_CARRIER, "", None
+    word, work = CARRIERS[kind]
+    return kind, word, work
