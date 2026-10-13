@@ -9,10 +9,15 @@ from __future__ import annotations
 
 import sys
 
+from onlysign.cli import command_names
 from onlysign.cli import main as command_line
 from onlysign.gui import main as window
 
-COMMANDS = {"scan", "certs", "sign", "check", "trust", "gate", "selftest"}
+# Read from the command line's own parser rather than restated here. The literal that used to be on
+# this line fell one behind the first time a verb was added: `mark` worked under `python -m onlysign`
+# and was handed to the window by this file, so the built executable did not have it. A second copy
+# of a list is a second place for it to be wrong.
+COMMANDS = set(command_names())
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -471,6 +471,21 @@ def _cmd_mark(args: argparse.Namespace) -> int:
     return 0 if not failed else 1
 
 
+def command_names() -> list[str]:
+    """The verbs this command line offers, read from the parser that defines them.
+
+    For a caller that has to decide *before* parsing: the executable's entry point sends anything
+    that is not a verb to the window, so it needs the set first. It used to hold its own literal set,
+    and that literal fell one behind the first time a verb was added -- `mark` worked under
+    `python -m onlysign` and reached the window from the built executable. A list that has to be kept
+    in step by hand is a list that will not be, so this asks the parser instead of restating it.
+    """
+    for action in build_parser()._actions:                  # noqa: SLF001 - argparse offers no public
+        if isinstance(action, argparse._SubParsersAction):  # way to ask what its subcommands are
+            return sorted(action.choices)
+    return []
+
+
 def take_language(arguments: list[str]) -> tuple[list[str], str]:
     """Pull ``--lang`` out of the arguments wherever it appears.
 

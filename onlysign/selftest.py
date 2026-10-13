@@ -1035,6 +1035,21 @@ def main() -> int:
         truthy("TEST-PRIMARY" in report["text"], "the mark does not name the configured primary")
         truthy("TEST-SECONDARY" in report["text"], "the secondary mark is missing")
 
+    def every_verb_the_command_line_offers_is_reachable():
+        # The entry point that gets packaged decides between the window and the command line, and it
+        # held its own literal set of verbs. That literal was wrong in BOTH directions: it was missing
+        # `mark`, so the built executable handed the new verb to the window and only
+        # `python -m onlysign` had it; and it contained `selftest`, which is not a command line verb
+        # at all -- that one runs as `python -m onlysign.selftest`. It reads the parser now, and this
+        # is the check that would have caught the first mistake on the day it was made.
+        from OnlySign import COMMANDS                                  # noqa: PLC0415 - the entry point
+        from onlysign import cli                                       # noqa: PLC0415
+        same(sorted(COMMANDS), cli.command_names(),
+             "what the executable dispatches against what the parser offers")
+        truthy("mark" in COMMANDS, "the executable cannot reach a verb the command line offers")
+        falsy("selftest" in COMMANDS,
+              "the executable dispatches a name the command line does not offer")
+
     def no_identity_means_no_mark():
         target = mark_work / "anonymous.zip"
         target.write_bytes(b"PK\x05\x06" + bytes(18))
@@ -1048,6 +1063,8 @@ def main() -> int:
     check("a format that can be signed is refused", a_format_that_can_be_signed_is_refused)
     check("the mark command writes a boot sector", the_mark_command_writes_a_boot_sector)
     check("no identity means no mark", no_identity_means_no_mark)
+    check("every verb the command line offers reaches the executable",
+          every_verb_the_command_line_offers_is_reachable)
 
     # --- cleaning up after itself --------------------------------------------- #
     if throwaway is not None:
