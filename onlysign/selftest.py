@@ -517,6 +517,34 @@ def main() -> int:
         truthy("0 changed by something this ledger has no record of" in audit.summarise(report),
                "the summary does not separate the routine cases from the alarming one")
 
+    def a_signer_disagreement_is_not_reported_as_a_change():
+        # The bytes on disk are exactly the ones that were signed, so nothing was modified -- and the
+        # record names a different certificate. That used to be reported as `changed`, under a summary
+        # line reading "changed by something this ledger has no record of": an accusation about the
+        # bytes, on a file whose bytes are on record, and a non-zero exit code for a pipeline. The
+        # reachable cause is an answer that came from somewhere other than the file, and for an MSI
+        # that is what happens whenever the package's own stream cannot be read.
+        if not signer.carries_own_signature(sample):
+            raise NotTested("there is no signed file to disagree about, because the signing above "
+                            "did not leave one")
+        path = scratch / "signer-mismatch.ndjson"
+        ledger.append(path, {"t": "2026-01-01T00:00:00Z", "file": str(sample), "name": "sign-me.exe",
+                             "sha256_signed": ledger.hash_file(sample), "sha256_unsigned": "0" * 64,
+                             "thumbprint": "AA" * 20})
+        report = audit.audit(path)
+        finding = report.findings[0]
+        same(finding.verdict, audit.SIGNER_DIFFERS, "the verdict when the signer does not agree")
+        truthy("the bytes are the ones on record" in finding.detail,
+               f"the detail does not say the bytes are unchanged: {finding.detail!r}")
+        summary = audit.summarise(report)
+        truthy("0 changed by something this ledger has no record of" in summary,
+               f"the summary blames the bytes for a signer disagreement: {summary}")
+        truthy("1 whose bytes are on record but whose signer is not" in summary,
+               f"the summary does not count it: {summary}")
+        # Still worth looking at, because the signer is not the one on record -- but for its own
+        # reason and under its own name, which is the whole point of giving it its own verdict.
+        same([f.name for f in report.needing_attention()], ["sign-me.exe"], "what asks for attention")
+
     def execute_refuses_to_pretend():
         plan = workflow.Plan(paths=[str(project / "dist" / "thing.exe")],
                              thumbprint=throwaway.thumbprint)
@@ -539,6 +567,8 @@ def main() -> int:
     check("a declared output with nothing in it is explained",
           discovery_says_why_a_declared_output_is_empty)
     check("a directory the project declares is followed", discovery_follows_a_declared_directory)
+    check("a signer disagreement is not reported as a change",
+          a_signer_disagreement_is_not_reported_as_a_change)
     check("the audit tells the routine cases from the alarming one",
           audit_separates_the_two_kinds_of_news)
     check("a dry run cannot be mistaken for a real one", execute_refuses_to_pretend)

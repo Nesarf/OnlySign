@@ -32,8 +32,12 @@ NOW_UNSIGNED = "now unsigned"
 GONE = "gone"
 PUBLISHED = "published"
 RELOCATED = "relocated"
+# The bytes are the ones on record, but the signer read for them is not the signer on record. Its own
+# verdict because it is its own piece of news: nothing was modified, and reporting it as `changed`
+# -- which this used to -- accuses somebody of an unrecorded edit while the bytes sit there unaltered.
+SIGNER_DIFFERS = "signer differs"
 
-ALARMING = (CHANGED, NOW_UNSIGNED)
+ALARMING = (CHANGED, NOW_UNSIGNED, SIGNER_DIFFERS)
 
 
 @dataclass
@@ -117,9 +121,19 @@ def audit(ledger_path: str | os.PathLike[str]) -> Report:
                               else "it carries no signature, and its bytes match neither recorded hash")
         elif current == record.get("sha256_signed"):
             if record.get("thumbprint") and own.thumbprint.upper() != str(record["thumbprint"]).upper():
-                finding.verdict = CHANGED
-                finding.detail = (f"the recorded signer is {str(record['thumbprint'])[:12]} but the "
-                                  f"file carries {own.thumbprint[:12]}")
+                # The bytes are exactly the ones that were signed, so nothing about this file was
+                # modified -- and yet the signer does not agree with the record. Two ways that
+                # happens, and neither is an edit: the answer came from somewhere other than the
+                # file (a security catalog is the usual cause, and for an MSI it is what happens
+                # whenever the package's own stream cannot be read), or the record's thumbprint is
+                # wrong. Reported for what it is, because "changed by something this ledger has no
+                # record of" is a statement about the bytes and here the bytes are on record.
+                finding.verdict = SIGNER_DIFFERS
+                finding.detail = (
+                    f"the bytes are the ones on record; the signer read for them is "
+                    f"{own.thumbprint[:12]} where the record says "
+                    f"{str(record['thumbprint'])[:12]} -- which happens when the answer comes from a "
+                    f"catalog rather than from the file, or when the record names the wrong certificate")
             else:
                 finding.verdict = UNCHANGED
         else:
@@ -141,6 +155,7 @@ def summarise(report: Report) -> str:
         f"{tally.get(UNCHANGED, 0)} unchanged",
         f"{tally.get(SUPERSEDED, 0)} superseded by a later signing",
         f"{tally.get(CHANGED, 0)} changed by something this ledger has no record of",
+        f"{tally.get(SIGNER_DIFFERS, 0)} whose bytes are on record but whose signer is not",
         f"{tally.get(NOW_UNSIGNED, 0)} now unsigned",
         f"{tally.get(GONE, 0)} gone",
     ]

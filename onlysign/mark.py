@@ -76,18 +76,6 @@ def parse_mark(text: str) -> dict:
     return found
 
 
-def digest_of(path: str) -> str:
-    """sha256 of the file, read in pieces so a large artifact is not held in memory."""
-    h = hashlib.sha256()
-    with open(path, "rb") as handle:
-        while True:
-            block = handle.read(1 << 20)
-            if not block:
-                break
-            h.update(block)
-    return h.hexdigest()
-
-
 def names_from(path: str) -> tuple[str, list[str]]:
     """The names to mark with, from a local file and never from this repository.
 

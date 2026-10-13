@@ -790,6 +790,7 @@ class Window:
         return self.t(i18n_key="audit.summary", records=len(report.findings),
                       unchanged=counts.get(audit.UNCHANGED, 0),
                       changed=counts.get(audit.CHANGED, 0),
+                      signer=counts.get(audit.SIGNER_DIFFERS, 0),
                       unsigned=counts.get(audit.NOW_UNSIGNED, 0),
                       gone=counts.get(audit.GONE, 0))
 

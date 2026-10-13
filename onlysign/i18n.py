@@ -317,6 +317,9 @@ STRINGS: dict[str, dict[str, str]] = {
     "verdict.unchanged": {"zh": "仍与记录一致", "en": "unchanged", "ja": "記録のまま"},
     "verdict.superseded": {"zh": "已被后来签的那一份取代", "en": "superseded", "ja": "あとで署名したものに代わった"},
     "verdict.changed": {"zh": "被账本没有记录的东西改过", "en": "changed", "ja": "記録に無い変更"},
+    "verdict.signer differs": {"zh": "字节与记录一致，但签名者不是记录里的那个",
+                               "en": "the bytes are on record, the signer is not",
+                               "ja": "バイトは記録のまま、署名者だけが違う"},
     "verdict.now unsigned": {"zh": "签名没了", "en": "now unsigned", "ja": "署名が無くなった"},
     "verdict.gone": {"zh": "文件不在了", "en": "gone", "ja": "ファイルが無い"},
     "verdict.published": {"zh": "已发布", "en": "published", "ja": "公開済み"},
@@ -324,10 +327,13 @@ STRINGS: dict[str, dict[str, str]] = {
     "audit.replaced_by": {"zh": "    后来签的是 {when}", "en": "    replaced by {when}",
                           "ja": "    あとで署名したもの {when}"},
     "audit.summary": {"zh": "{records} 条记录：{unchanged} 条仍一致，{changed} 条被账本解释不了的改动，"
+                            "{signer} 条字节一致但签名者对不上，"
                             "{unsigned} 条签名没了，{gone} 条文件不在",
                       "en": "{records} record(s): {unchanged} unchanged, {changed} changed by "
-                            "something this ledger has no record of, {unsigned} now unsigned, {gone} gone",
+                            "something this ledger has no record of, {signer} whose bytes are on "
+                            "record but whose signer is not, {unsigned} now unsigned, {gone} gone",
                       "ja": "記録 {records} 件：{unchanged} 件は記録のまま、{changed} 件は記録に無い変更、"
+                            "{signer} 件はバイトが記録のままで署名者だけが違い、"
                             "{unsigned} 件は署名が無くなり、{gone} 件はファイルがありません"},
     "audit.broken": {"zh": "账本里有 {count} 行读不出来", "en": "{count} unreadable line(s) in the ledger",
                      "ja": "読めない行が {count} 行あります"},
