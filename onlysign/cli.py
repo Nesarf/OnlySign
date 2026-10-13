@@ -461,9 +461,12 @@ def _cmd_mark(args: argparse.Namespace) -> int:
             carrier, work = "zip", marks.mark_zip
         elif marks.tar_mark_offset(path) is not None or _looks_like_tar(path):
             carrier, work = "tar", marks.mark_tar
+        elif marks.iso_app_use_offset(path) is not None:
+            carrier, work = "ISO", marks.mark_iso
         else:
             print(f"{os.path.basename(path)}: no carrier for this format yet -- a zip takes a "
-                  f"comment, a tar takes an appended member, and a boot sector takes the mark itself")
+                  f"comment, a tar takes an appended member, an ISO takes its Application Use "
+                  f"field, and a boot sector takes the mark itself")
             failed += 1
             continue
         try:

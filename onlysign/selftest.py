@@ -1092,6 +1092,60 @@ def main() -> int:
         same(changed.get("raw"), found.get("raw"), "the mark text after the archive was altered")
         same(changed.get("digest_matches"), False, "the digest after the archive was altered")
 
+    def an_iso_carries_the_mark_in_its_application_use_field():
+        # The one part of an ISO that the standard sets aside for the application, so nothing the
+        # filesystem cares about is touched -- and the check that matters is the last one: a real ISO
+        # reader still opens the image and still reads the file inside it afterwards.
+        try:
+            import pycdlib
+        except ImportError:
+            raise NotTested(
+                "pycdlib is not installed, so there is no way to make a real ISO here; writing a "
+                "lookalike would test the reader against a fixture it was written from")
+        import io
+        archive = mark_work / "marked.iso"
+        if archive.exists():
+            archive.unlink()
+        image = pycdlib.PyCdlib()
+        image.new(interchange_level=3, vol_ident="ONLYSIGN-TEST")
+        inside = b"hello from inside an iso\n"
+        # The length is not decorative: pycdlib stores exactly this many bytes, and 24 against a
+        # 25-byte payload silently drops the newline -- which is how this check first failed.
+        image.add_fp(io.BytesIO(inside), len(inside), "/HELLO.TXT;1")
+        image.write(str(archive))
+        image.close()
+
+        truthy(mark.iso_app_use_offset(str(archive)) is not None, "the ISO was not recognised as one")
+        before = mark.iso_body_digest(str(archive))
+        code, said = run_cli("mark", str(archive), "--identity", str(mark_identity), "--year", "2026")
+        same(code, 0, f"the mark command on an ISO ({said.strip()!r})")
+        found = mark.read_iso_mark(str(archive))
+        truthy(found.get("marked"), f"no mark was found in the ISO: {said!r}")
+        same(found.get("digest_matches"), True, "the digest against the image it was taken from")
+        same(mark.iso_body_digest(str(archive)), before,
+             "the digest after marking -- zeroing the field is what keeps the number the same")
+
+        # A real reader, which knows nothing about this tool, must still be able to use the image.
+        reopened = pycdlib.PyCdlib()
+        reopened.open(str(archive))
+        same(reopened.pvd.volume_identifier.decode().strip(), "ONLYSIGN-TEST",
+             "the volume identifier after marking")
+        out = io.BytesIO()
+        reopened.get_file_from_iso_fp(out, iso_path="/HELLO.TXT;1")
+        same(out.getvalue(), b"hello from inside an iso\n", "the file inside the image")
+        reopened.close()
+
+        # And a change elsewhere in the image has to stop the digest matching.
+        size = os.path.getsize(archive)
+        with open(archive, "r+b") as handle:
+            handle.seek(size - 1)
+            last = handle.read(1)
+            handle.seek(size - 1)
+            handle.write(bytes([last[0] ^ 0x01]))
+        changed = mark.read_iso_mark(str(archive))
+        same(changed.get("raw"), found.get("raw"), "the mark text after the image was altered")
+        same(changed.get("digest_matches"), False, "the digest after the image was altered")
+
     def no_identity_means_no_mark():
         target = mark_work / "anonymous.zip"
         target.write_bytes(b"PK\x05\x06" + bytes(18))
@@ -1103,6 +1157,8 @@ def main() -> int:
     check("a zip carries the mark and its digest guards the archive",
           a_zip_carries_the_mark_and_the_digest_guards_it)
     check("a tar carries the mark as a member", a_tar_carries_the_mark_as_a_member)
+    check("an ISO carries the mark in its Application Use field",
+          an_iso_carries_the_mark_in_its_application_use_field)
     check("a format that can be signed is refused", a_format_that_can_be_signed_is_refused)
     check("the mark command writes a boot sector", the_mark_command_writes_a_boot_sector)
     check("no identity means no mark", no_identity_means_no_mark)

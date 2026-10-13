@@ -385,3 +385,101 @@ def read_tar_mark(path: str) -> dict:
     if found.get("sha256"):
         found["digest_matches"] = found["sha256"] == tar_body_digest(path)
     return found
+
+
+# --- iso ---------------------------------------------------------------------- #
+#
+# Where a zip has a comment field and a tar has members, an ISO 9660 image has a reserved field with
+# this tool's name on it: the Primary Volume Descriptor's Application Use area, 512 bytes at offset
+# 883 within the descriptor at sector 16. That is the one part of the image the standard sets aside
+# for the application, so the mark goes there and nothing the filesystem cares about is touched.
+#
+# The digest is the same idea as the zip's: the hash is taken with that field treated as absent --
+# zeroed -- so the number a reader recomputes from the marked image is the number that was recorded.
+ISO_SECTOR = 2048
+ISO_PVD_OFFSET = 16 * ISO_SECTOR                      # 32768
+ISO_PVD_MAGIC = b"CD001"
+ISO_PVD_OFFSET_IN_SECTOR = 1                          # the magic sits after the one-byte type
+ISO_APP_USE_OFFSET = ISO_PVD_OFFSET + 883
+ISO_APP_USE_BYTES = 512
+
+
+def iso_app_use_offset(path: str) -> int | None:
+    """Where the Application Use field is, or None when this is not an ISO 9660 image.
+
+    Recognised by the descriptor's own magic rather than by the file's extension: `CD001` at sector
+    16 is the image saying what it is, and a filename is the one thing a reader may not trust.
+    """
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(ISO_PVD_OFFSET + ISO_PVD_OFFSET_IN_SECTOR)
+            if handle.read(len(ISO_PVD_MAGIC)) != ISO_PVD_MAGIC:
+                return None
+    except OSError:
+        return None
+    return ISO_APP_USE_OFFSET
+
+
+def iso_body_digest(path: str) -> str:
+    """The sha256 of an ISO with its Application Use field zeroed.
+
+    Zeroing is what makes the number reproducible from the marked image: a reader clears the same 512
+    bytes and hashes, and gets the number the mark records. Hashing the image as it stands would make
+    the value depend on the mark that carries it -- the same trap as a digest inside a zip comment.
+    """
+    if iso_app_use_offset(path) is None:
+        raise ValueError("no CD001 at sector 16: this is not an ISO 9660 image")
+    start = ISO_APP_USE_OFFSET
+    end = ISO_APP_USE_OFFSET + ISO_APP_USE_BYTES
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        position = 0
+        while True:
+            block = handle.read(1 << 20)
+            if not block:
+                break
+            low = max(0, start - position)
+            high = min(len(block), end - position)
+            if low < high:
+                block = block[:low] + bytes(high - low) + block[high:]
+            digest.update(block)
+            position += len(block)
+    return digest.hexdigest()
+
+
+def mark_iso(path: str, *, primary: str, secondary: list[str] | None = None, year: str = "",
+             digest: bool = True, dry_run: bool = False) -> dict:
+    """Write the mark into an ISO's Application Use field, padded to the field's length."""
+    if iso_app_use_offset(path) is None:
+        raise ValueError("no CD001 at sector 16: this is not an ISO 9660 image")
+    body = iso_body_digest(path) if digest else ""
+    line = mark_line(primary=primary, secondary=secondary, digest=body, year=year,
+                     kind="hash-record" if body else "visibility")
+    payload = line.encode("utf-8")
+    if len(payload) > ISO_APP_USE_BYTES:
+        raise ValueError(f"a mark of {len(payload)} bytes will not fit in the {ISO_APP_USE_BYTES}-byte "
+                         f"Application Use field")
+    if not dry_run:
+        with open(path, "r+b") as handle:
+            handle.seek(ISO_APP_USE_OFFSET)
+            # Spaces rather than NULs: the field is an a-character string, and a tool that prints it
+            # should show the mark and then blank, not the mark and then a run of control characters.
+            handle.write(payload + b" " * (ISO_APP_USE_BYTES - len(payload)))
+    return {"path": path, "line": line, "digest": body, "wrote": not dry_run}
+
+
+def read_iso_mark(path: str) -> dict:
+    """What mark an ISO carries, and whether its digest still describes the image."""
+    if iso_app_use_offset(path) is None:
+        return {"path": path, "marked": False}
+    with open(path, "rb") as handle:
+        handle.seek(ISO_APP_USE_OFFSET)
+        raw = handle.read(ISO_APP_USE_BYTES)
+    found = parse_mark(raw.decode("utf-8", "replace").rstrip(" \x00"))
+    if not found:
+        return {"path": path, "marked": False}
+    found["path"] = path
+    found["marked"] = True
+    if found.get("sha256"):
+        found["digest_matches"] = found["sha256"] == iso_body_digest(path)
+    return found
