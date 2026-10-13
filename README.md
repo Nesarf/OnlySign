@@ -120,6 +120,17 @@ OnlySign.exe --check    builds the window, switches language twice, closes it
 `--tabs` reads the names out of the notebook rather than out of this file, so a page that was written
 and never added shows up as a shortfall rather than as silence.
 
+**Why the executable has to answer for itself rather than a script looking at it.** UI Automation was
+tried, and it cannot read this window's contents at all. The title bar and the menu come through --
+`独家签署`, then 文件, 设置, 语言, 关于 -- and everything below them is `PaneControl` of class
+`TkChild` with no name and no value: no tab names, no group boxes, no labels, no button text. What
+makes that a finding rather than a guess is the control: a plain tkinter window built on the spot
+(`ttk.Notebook`, two tabs, one label, one button) reads exactly the same way, so it is a property of
+Tk -- not of packaging, not of this tool, not of the machine's COM configuration. Two consequences,
+and the second is worth saying plainly: a script cannot verify this window from outside, which is why
+`--tabs` exists; and **this window cannot be read by a screen reader either.** That is a real limit
+of the tool as it stands, stated here rather than left implicit.
+
 ## Building the executable
 
 ```powershell
