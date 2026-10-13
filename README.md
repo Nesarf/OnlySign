@@ -34,7 +34,7 @@ From a checkout, without building anything:
 ```powershell
 python -m onlysign.gui                          # the window
 python OnlySign.py                              # the same window, through the packaged entry point
-python -m onlysign selftest                     # run the engine against itself: 47 checks
+python -m onlysign selftest                     # run the engine against itself: 48 checks
 python -m onlysign selftest --keep              # leave the scratch directory behind to look at
 python tools/gui_smoke.py                       # drive the window the way a person would: 6 checks
 
@@ -227,7 +227,7 @@ onlysign/engine/bootmark.py  a mark in 512 bytes, for the machines that cannot v
 onlysign/mark.py             the mark line, and the carriers the verb puts it in
 onlysign/gui.py              the window; layout and a worker thread, nothing else
 onlysign/cli.py              the engine with a keyboard instead of a window
-onlysign/selftest.py         47 checks of the engine, in a scratch directory
+onlysign/selftest.py         48 checks of the engine, in a scratch directory
 tools/build.py               building the one-file executable
 tools/gui_smoke.py           6 checks that drive the window itself
 tools/cfb-probe.py           what a compound file's header says, against what the reader returned
@@ -297,6 +297,19 @@ byte flipped anywhere in the archive makes the digest stop matching while the ma
 which is what a hash in a mark is for. `--no-digest` writes the mark with `kind:visibility` instead,
 for a carrier where there is nothing to hash.
 
+**A tar takes a member, not a comment.** A tar has no comment field at all, so the mark goes in as one
+appended member named `ONLYSIGN-MARK`: `tar -tvf` lists it and `tar -xOf archive ONLYSIGN-MARK` prints
+it, with no knowledge of this tool on the reading side, and nothing already in the archive is touched.
+Marking twice replaces that member rather than adding a second one, so the archive returns to the bytes
+it arrived as.
+
+The digest there is taken over **the archive's members up to the mark**, and the trade-off is worth
+stating: it is reproducible from the marked file alone -- which is the property that makes it checkable
+-- and it is **not** the number `sha256sum` prints, because the trailing padding and the
+end-of-archive marker are excluded. Measured while writing it: a two-member tar was 10240 bytes with
+its members ending at 9216, so the two definitions are genuinely different numbers. A digest a marked
+archive could never recompute would be the worse of the two.
+
 An MSI, a PE and a CAB are **refused**, with the reason printed. That is not a missing feature: those
 formats have a slot a signature goes in, so on them the attribution belongs in something the
 signature covers. Marking one anyway would put a claim nothing vouches for beside a claim something
@@ -342,9 +355,9 @@ Built and checked at every level:
 
 | what | how it is checked |
 |---|---|
-| the engine | `python -m onlysign selftest` -- 47 checks, in a scratch directory |
+| the engine | `python -m onlysign selftest` -- 48 checks, in a scratch directory |
 | the window | `python tools/gui_smoke.py` -- 6 checks that open it and press its buttons |
-| both PowerShell editions | the same 47 checks under Windows PowerShell and under PowerShell 7 |
+| both PowerShell editions | the same 48 checks under Windows PowerShell and under PowerShell 7 |
 | the executable | about 13 MB, one file: lists certificates, answers `scan --help`, opens its window |
 | reading a container | `python tools/cfb-probe.py <dir>` -- every compound file in it, against its own header |
 

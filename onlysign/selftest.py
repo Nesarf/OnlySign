@@ -1050,6 +1050,48 @@ def main() -> int:
         falsy("selftest" in COMMANDS,
               "the executable dispatches a name the command line does not offer")
 
+    def a_tar_carries_the_mark_as_a_member():
+        # A tar has no comment field, so the mark goes in as an appended member: every reader shows it
+        # without knowing this tool, and nothing already in the archive is touched. The digest is taken
+        # over the member region rather than the file, which is what makes it the same number before
+        # and after marking -- and therefore checkable from the marked file alone.
+        import tarfile
+        archive = mark_work / "marked.tar"
+        payload = mark_work / "tar-payload.bin"
+        payload.write_bytes(b"y" * 2000)
+        with tarfile.open(archive, "w") as made:
+            made.add(payload, "payload.bin")
+        before = mark.tar_body_digest(str(archive))
+        code, said = run_cli("mark", str(archive), "--identity", str(mark_identity))
+        same(code, 0, f"the mark command on a tar ({said.strip()!r})")
+        found = mark.read_tar_mark(str(archive))
+        truthy(found.get("marked"), f"no mark was found in the tar: {said!r}")
+        same(found.get("holder"), "(c) TEST-PRIMARY [TEST-SECONDARY]", "who the mark names")
+        same(found.get("digest_matches"), True, "the digest against the archive it was taken from")
+        same(mark.tar_body_digest(str(archive)), before,
+             "the digest after marking -- marking must not change the number it records")
+        with tarfile.open(archive) as opened:
+            names = opened.getnames()
+        truthy(mark.TAR_MEMBER in names, f"the mark member is not in the archive: {names}")
+        truthy("payload.bin" in names, f"the archive's own member is gone: {names}")
+
+        # Marking again replaces rather than stacks: a second member would leave the first one in the
+        # file for every reader to find. And the digest still describes the same archive.
+        mark.mark_tar(str(archive), primary="TEST-PRIMARY", secondary=["TEST-SECONDARY"])
+        with tarfile.open(archive) as opened:
+            after = opened.getnames()
+        same(len(after), len(names), "the member count after marking twice")
+        same(mark.tar_body_digest(str(archive)), before, "the digest after marking twice")
+
+        # And a changed archive has to stop matching, or the digest is decoration.
+        with open(archive, "r+b") as handle:
+            first = handle.read(1)
+            handle.seek(0)
+            handle.write(bytes([first[0] ^ 0x01]))
+        changed = mark.read_tar_mark(str(archive))
+        same(changed.get("raw"), found.get("raw"), "the mark text after the archive was altered")
+        same(changed.get("digest_matches"), False, "the digest after the archive was altered")
+
     def no_identity_means_no_mark():
         target = mark_work / "anonymous.zip"
         target.write_bytes(b"PK\x05\x06" + bytes(18))
@@ -1060,6 +1102,7 @@ def main() -> int:
 
     check("a zip carries the mark and its digest guards the archive",
           a_zip_carries_the_mark_and_the_digest_guards_it)
+    check("a tar carries the mark as a member", a_tar_carries_the_mark_as_a_member)
     check("a format that can be signed is refused", a_format_that_can_be_signed_is_refused)
     check("the mark command writes a boot sector", the_mark_command_writes_a_boot_sector)
     check("no identity means no mark", no_identity_means_no_mark)

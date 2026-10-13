@@ -379,6 +379,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _looks_like_tar(path: str) -> bool:
+    """Whether this is a tar at all, asked of the first header rather than of the file's name.
+
+    `ustar` at offset 257 is the magic, and its presence is the file saying what it is. A tar with no
+    mark member has nothing else to recognise it by, and guessing from the extension would put the
+    answer in the filename, which is the one thing a reader is not allowed to trust.
+    """
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(257)
+            return handle.read(5) in (b"ustar", b"ustar")
+    except OSError:
+        return False
+
+
 def _cmd_mark(args: argparse.Namespace) -> int:
     """Put a mark where there is nowhere to sign -- and refuse where there is.
 
@@ -442,14 +457,18 @@ def _cmd_mark(args: argparse.Namespace) -> int:
                   "resource) and sign the file")
             refused += 1
             continue
-        if marks.zip_eocd_at(path) is None:
+        if marks.zip_eocd_at(path) is not None:
+            carrier, work = "zip", marks.mark_zip
+        elif marks.tar_mark_offset(path) is not None or _looks_like_tar(path):
+            carrier, work = "tar", marks.mark_tar
+        else:
             print(f"{os.path.basename(path)}: no carrier for this format yet -- a zip takes a "
-                  f"comment, and a boot sector takes the mark itself")
+                  f"comment, a tar takes an appended member, and a boot sector takes the mark itself")
             failed += 1
             continue
         try:
-            done = marks.mark_zip(path, primary=primary, secondary=secondary, year=args.year,
-                                  digest=not args.no_digest, dry_run=args.dry_run)
+            done = work(path, primary=primary, secondary=secondary, year=args.year,
+                        digest=not args.no_digest, dry_run=args.dry_run)
         except (OSError, ValueError) as exc:
             print(f"{os.path.basename(path)}: {exc}")
             failed += 1
@@ -458,7 +477,7 @@ def _cmd_mark(args: argparse.Namespace) -> int:
         if args.json:
             continue
         print(f"{os.path.basename(path)}: {'would mark' if args.dry_run else 'marked'} "
-              f"({done['digest'][:16] + '...' if done['digest'] else 'no digest'})")
+              f"as a {carrier} ({done['digest'][:16] + '...' if done['digest'] else 'no digest'})")
 
     if args.json:
         print(json.dumps({"marked": results, "refused": refused, "failed": failed},
