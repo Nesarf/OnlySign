@@ -1,0 +1,86 @@
+# The engine against itself, on every push and every tag.
+#
+# What this is for: until now the 52 checks and the 15 window checks were run by hand, which means the
+# honest statement about this repository was "it passes on the machine it was written on, when somebody
+# remembers". A test suite nobody runs on a change is a claim, not a check.
+#
+# Three things about the shape of it:
+#
+# * **Windows, not Linux.** The tool signs through the `Set-AuthenticodeSignature` that ships with
+#   Windows PowerShell, and reads PE certificate tables. A Linux runner could not run it at all.
+# * **Both PowerShell editions.** The engine supports Windows PowerShell 5.1 and PowerShell 7, and both
+#   are on a windows runner. The two editions have already diverged once in a way that only one of them
+#   showed -- `ConvertFrom-Json` inferring `[DateTime]` in 6.0 and later -- so the same checks are run
+#   under each and the edition is named in the job.
+# * **Not tested is not a failure.** The self-test reports `untested` for a check it could not be given
+#   what it needs -- a timestamp authority that will not answer, a boot-sector check without Unicorn --
+#   and counts those separately, exiting 0. That is deliberate and this workflow relies on it: a CI job
+#   that went red whenever a free public timestamp server was busy would be a job people learn to ignore.
+#
+# The window smoke test is NOT here. It signs a real file, and a runner that competes with the rest of
+# the world for the same three timestamp authorities would fail for reasons that are not the code's.
+
+name: selftest
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  engine:
+    name: the engine, under ${{ matrix.powershell }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - powershell: Windows PowerShell 5.1
+            env-name: ONLYSIGN_POWERSHELL
+            env-value: powershell
+          - powershell: PowerShell 7
+            env-name: ONLYSIGN_POWERSHELL
+            env-value: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The tool itself has no dependencies, and that is a property worth keeping visible: this is the
+      # only install step, and it exists for the *unpacking of a sector image*, not for signing.
+      # Without it the boot-sector execution check reports "not tested" instead of passing or failing.
+      - name: the one optional dependency
+        run: python -m pip install --disable-pip-version-check unicorn
+        continue-on-error: true
+
+      - name: run the engine's self-test
+        shell: pwsh
+        env:
+          ONLYSIGN_POWERSHELL: ${{ matrix.env-value }}
+        run: |
+          python -m onlysign.selftest 2>&1 | Tee-Object -FilePath selftest.log
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::the self-test reported failures; see the log above"
+            exit 1
+          }
+
+      - name: the version is declared once, and agrees
+        shell: pwsh
+        run: |
+          # This repository had the version written in three places and two of them disagreed -- the
+          # binaries said 1.0.0 while pyproject.toml said 0.1.0 -- and the fix was a guard in the build
+          # plus a check in the self-test. Those only run when somebody builds, so this asks the same
+          # question on every change, including one that touches only metadata and never builds.
+          python tools/ci-version-agrees.py
+
+      - name: keep the log when something failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftest-log-${{ matrix.env-value }}
+          path: selftest.log
+          if-no-files-found: ignore
