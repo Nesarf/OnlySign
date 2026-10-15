@@ -44,17 +44,18 @@ jobs:
             env-name: ONLYSIGN_POWERSHELL
             env-value: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
-      # The tool itself has no dependencies, and that is a property worth keeping visible: this is the
-      # only install step, and it exists for the *unpacking of a sector image*, not for signing.
-      # Without it the boot-sector execution check reports "not tested" instead of passing or failing.
-      - name: the one optional dependency
-        run: python -m pip install --disable-pip-version-check unicorn
+      # The tool itself has no dependencies, and that property is worth keeping visible: these two are
+      # the only install steps, and neither is for signing. Unicorn executes the boot sector's machine
+      # code; pycdlib makes a real ISO 9660 image so the ISO carrier can be checked against one. Without
+      # either, the corresponding check reports "not tested" rather than passing or failing.
+      - name: the two optional dependencies
+        run: python -m pip install --disable-pip-version-check unicorn pycdlib
         continue-on-error: true
 
       - name: run the engine's self-test
