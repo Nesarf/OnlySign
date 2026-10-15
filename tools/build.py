@@ -29,7 +29,7 @@ ENTRY = os.path.join(ROOT, "OnlySign.py")
 
 DEFAULT_IDENTITY = {
     "product": "OnlySign",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "company": "its publisher",
     "copyright": "(c) its publisher",
     "trademarks": "",
