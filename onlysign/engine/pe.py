@@ -85,6 +85,28 @@ def _looks_like_certificate_table(data: bytes | bytearray, offset: int) -> bool:
     return 8 <= length <= len(data) - offset
 
 
+def _entry_claims_no_certificate(data: bytes | bytearray, offset: int) -> bool:
+    """Whether the entry names a table whose own header says it holds no certificate.
+
+    The case this exists for was measured on a real Electron build. `postject` copies node.exe -- which
+    is signed by its vendor -- and appends the application blob, which invalidates that signature while
+    leaving the directory entry in place. On the released `VtuberMonitorLink.exe` the entry read
+    offset 93564416, length 15688, and the eight bytes at that offset read ``dwLength = 0``.
+
+    That is different in kind from an entry pointing at section data. A WIN_CERTIFICATE whose length is
+    zero declares that no certificate is there, so this is not "the number is wrong and stripping would
+    cut into the file" -- it is "the number describes an empty table". Clearing the entry is therefore
+    safe, and it must be cleared: measured, a file in this state cannot be signed at all. A signature
+    attaches and then no timestamp authority can be reached for it, on a 93 MB file, while a small file
+    timestamps fine in the same minute; clearing the entry made the same file sign and timestamp
+    normally. That is why `signtool` failing with 0x800700C1 on a postject output is a known thing.
+    """
+    if offset < 0 or offset + 8 > len(data):
+        return False
+    length, revision, kind = struct.unpack_from("<IHH", data, offset)
+    return length == 0 and revision == 0 and kind == 0
+
+
 def pe_certificate_table(path: str | os.PathLike[str]) -> tuple[int, int] | None:
     """``(offset, size)`` of the embedded signature, or None when there is none.
 
@@ -182,6 +204,19 @@ def strip_signature(path: str | os.PathLike[str]) -> int:
     # afterwards, so nothing downstream noticed. A wrong entry is a symptom of a tool that appended
     # without updating the directory, and saying so is more useful than doing what it says.
     if not _looks_like_certificate_table(data, offset):
+        if _entry_claims_no_certificate(data, offset):
+            # An entry naming an empty table: no bytes to drop, and nothing to be wrong about --
+            # clearing the eight bytes of the entry is the whole repair. It has to happen, because a
+            # file in this state cannot be signed (see `_entry_claims_no_certificate`).
+            pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
+            optional = pe_offset + 24
+            magic = struct.unpack_from("<H", data, optional)[0]
+            directory = optional + (96 if magic == 0x10B else 112)
+            struct.pack_into("<II", data, directory + 4 * 8, 0, 0)
+            recompute_checksum(data)
+            with open(path, "wb") as fh:
+                fh.write(bytes(data))
+            return 0
         raise ValueError(
             f"{path}: the certificate table entry points at {offset} but there is no WIN_CERTIFICATE "
             f"there, so this entry was not written by whatever appended the signature -- stripping on "

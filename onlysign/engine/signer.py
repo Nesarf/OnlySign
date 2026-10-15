@@ -94,6 +94,10 @@ class SignResult:
     timestamp_authority: str = ""
     attempts: list[str] = field(default_factory=list)
     restored: bool | None = None
+    # Set when a stale certificate-table entry had to be cleared before the file could be signed at all.
+    # Worth carrying on the result rather than only in a log line: it means the bytes that were signed are
+    # not the bytes the caller handed over, and a caller reporting a hash should know that.
+    repaired: bool = False
 
     def to_record(self, *, note: str = "", signer: str = "") -> dict[str, Any]:
         """The ledger record for this signing, in the shape the existing toolchain writes."""
@@ -372,6 +376,32 @@ def sign_file(path: str | os.PathLike[str], *, thumbprint: str,
 
     result.before_hash = ledger.hash_file(path)
     original = pe.capture_state(path)
+
+    # A stale certificate-table entry makes a file impossible to sign, so it is cleared before the
+    # first attempt rather than after a failure. Measured on a real Electron/SEA build, where the
+    # launcher is node.exe with an application blob appended by postject: postject copies a base image
+    # its vendor signed, appends without updating the directory entry, and the entry is left pointing at
+    # the offset that signature had. Windows then reports the file unsigned -- correctly -- and every
+    # signing attempt attaches a signature and then fails to obtain a timestamp for it, on three
+    # authorities, while a small file signs and timestamps fine in the same minute.
+    #
+    # Only an entry whose own header declares a length of zero is cleared (`pe.strip_signature` decides
+    # that, and refuses anything else with the number left alone). `capture_state` above already holds
+    # what is needed to put the file back, so a rollback after this still returns the original bytes.
+    if pe.identify(path) == pe.KIND_PE:
+        try:
+            repaired = pe.strip_signature(path)
+        except ValueError:
+            # An entry naming something that is not an empty table: a wrong number, which is a thing to
+            # report rather than act on. The signing attempt below will say what it can.
+            repaired = 0
+        if repaired == 0 and ledger.hash_file(path) != result.before_hash:
+            # The entry was cleared without dropping bytes. The signature about to be appended covers
+            # these bytes, so the "before signing" hash has to be the repaired file's, or the record
+            # would name bytes that were never signed.
+            result.before_hash = ledger.hash_file(path)
+            original = pe.capture_state(path) if original is not None else None
+            result.repaired = True
 
     if backend == BACKEND_SIGNTOOL:
         exe = find_signtool()

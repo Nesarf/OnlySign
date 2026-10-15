@@ -155,6 +155,11 @@ def execute(plan: Plan, *, dry_run: bool = True,
         stored = ledger.append(plan.ledger_at(), record)
         outcome.records.append(stored)
         say(f"  signed and recorded ({result.timestamp_authority or 'no timestamp'})")
+        if result.repaired:
+            # Said out loud rather than left in the record: the bytes that were signed are not the bytes
+            # the caller handed over. A stale certificate-table entry had to be cleared first, because a
+            # file in that state cannot be timestamped at all -- see `pe._entry_claims_no_certificate`.
+            say("    note: a stale certificate-table entry was cleared first; that repair is in the record")
 
         if destination:
             target = os.path.join(destination, os.path.basename(path))

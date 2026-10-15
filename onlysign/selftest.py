@@ -285,8 +285,51 @@ def main() -> int:
         same(ledger.hash_file(target), fixture, "the bytes after the refusal -- it must change nothing")
         same(os.path.getsize(target), size_before, "the size after the refusal")
 
+    def an_entry_naming_an_empty_table_is_cleared():
+        # The neighbouring case, and it needs the opposite answer. `postject` copies a signed base image
+        # and appends to it without updating the directory entry, so the entry ends up naming an offset
+        # whose eight bytes read as a WIN_CERTIFICATE of length zero -- measured on a released Electron
+        # build: entry offset 93564416 / length 15688, and dwLength = 0 at that offset.
+        #
+        # A file in that state cannot be signed at all: the signature attaches and then no timestamp
+        # authority can be reached for it (measured: 93 MB failed three times while a small file signed
+        # in the same minute). Clearing the entry is the repair, and it is safe where truncating is not
+        # -- no bytes are dropped, so there is no offset that could be wrong about where data ends. On
+        # the released launcher the repair changed exactly eight bytes and the file then signed.
+        #
+        # The fixture is the released file's malformation rather than a real signature: an entry naming a
+        # run of zeros. Enough to exercise the branch, and it says so rather than pretending.
+        import struct
+        target = scratch / "empty-table-entry.exe"
+        shutil.copy2(sample_source(args.sample), target)
+        pe.strip_signature(target)                     # start from a file with no signature at all
+        falsy(pe.pe_certificate_table(target) is not None, "the strip left no certificate table")
+
+        data = bytearray(Path(target).read_bytes())
+        pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
+        magic = struct.unpack_from("<H", data, pe_offset + 24)[0]
+        entry = pe_offset + 24 + (96 if magic == 0x10B else 112) + 4 * 8
+        where = len(data) - 65536                      # inside the file, in the appended slack
+        data[where:where + 8] = bytes(8)               # dwLength = 0: a table that holds nothing
+        struct.pack_into("<II", data, entry, where, 15688)
+        Path(target).write_bytes(bytes(data))
+
+        # It must be recognised as the empty-table case first, which is the decision the repair turns on.
+        truthy(pe.pe_certificate_table(target) is not None, "the synthetic entry is seen at all")
+        falsy(pe._looks_like_certificate_table(Path(target).read_bytes(), where),
+              "an empty table is not mistaken for a real one")
+        truthy(pe._entry_claims_no_certificate(Path(target).read_bytes(), where),
+               "an entry whose header says length 0 is recognised as naming no certificate")
+
+        size_before = os.path.getsize(target)
+        removed = pe.strip_signature(target)
+        same(removed, 0, "the repair drops no bytes")
+        same(os.path.getsize(target), size_before, "the file is the same size afterwards")
+        falsy(pe.pe_certificate_table(target) is not None, "the entry is clear afterwards")
+
     check("a PE image is identified and its signature can be removed", identify_and_strip)
     check("a stale certificate table entry is refused", a_stale_certificate_table_entry_is_refused)
+    check("an entry naming an empty table is cleared instead", an_entry_naming_an_empty_table_is_cleared)
     check("something that is not an artifact is not called one", unknown_kinds)
 
     # --- certificates --------------------------------------------------------- #
