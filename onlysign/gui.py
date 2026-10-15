@@ -236,6 +236,10 @@ class Window:
         root.title(self.t(i18n_key="app.name"))
         self._build()
         self._fit_to_screen()
+        # What she looks like before anything has been done. Idle is a state, not the absence of one:
+        # a character that only appears after a failure is a character that means "something is
+        # wrong", which is not what a figure in the corner should mean.
+        self.show_state("idle")
         self.refresh_certificates()
         self.root.after(100, self._drain)
 
@@ -517,6 +521,11 @@ class Window:
         self.report.pack(side="left", fill="both", expand=True)
         report_scroll = ttk.Scrollbar(report, orient="vertical", command=self.report.yview)
         report_scroll.pack(side="right", fill="y")
+        # The character, at the right of the result. Right rather than left because the text is what
+        # is read and the picture is what is glanced at, and packing it afterwards keeps the text at
+        # the width it already had.
+        self.character = ttk.Label(report)
+        self.character.pack(side="right", padx=(8, 6))
         self.report.configure(yscrollcommand=report_scroll.set)
         self.report.tag_configure("bad", foreground="#a00000")
         self.report.tag_configure("good", foreground="#006000")
@@ -668,6 +677,7 @@ class Window:
         kind = pe.identify(path)
         carrier, word, work = mark.carrier_for(path, signable=pe.signable(kind))
         if carrier == mark.KIND_SIGNED:
+            self.show_state("refused")
             self.say(self.t(i18n_key="say.mark_carrier",
                             carrier=self.t(i18n_key="carrier.signed")), "bad")
             self.say("     " + pe.describe(kind))
@@ -724,6 +734,7 @@ class Window:
     def _say_a_mark(self, written: dict) -> None:
         """One mark, as it was written, plus what reading it back says about the file."""
         self.mark_file.set(written.get("path", self.mark_file.get()))
+        self.show_state("signed")
         self.say(self.t(i18n_key="say.mark_placed"), "good")
         self.say("     " + written.get("line", ""))
         if written.get("digest"):
@@ -751,6 +762,7 @@ class Window:
 
     def _say_what_came_back(self, found: dict) -> None:
         if not found.get("marked"):
+            self.show_state("unsigned")
             self.say(self.t(i18n_key="say.mark_none"), "bad")
             return
         self.say(self.t(i18n_key="say.mark_read"), "key")
@@ -802,6 +814,58 @@ class Window:
 
         self._run(building, done)
 
+    # --- the character, which reacts to what happened ---------------------------- #
+
+    def _state_map(self) -> dict:
+        """Which picture belongs to which outcome, read from the file the art tool wrote.
+
+        A map rather than a list of names in this file, so that changing which pose means "signed" is
+        a change to the art and not to the window. Absent, the window simply has no character and
+        everything else still works -- a decoration is not worth a failed start.
+        """
+        if getattr(self, "_states", None) is None:
+            self._states = {}
+            path = asset_path("mark", "states.json")
+            if path:
+                try:
+                    with open(path, "r", encoding="utf-8") as handle:
+                        loaded = json.load(handle)
+                    if isinstance(loaded, dict):
+                        self._states = {str(k): str(v) for k, v in loaded.items()}
+                except (OSError, ValueError):
+                    pass
+        return self._states
+
+    def show_state(self, state: str) -> None:
+        """Draw the character for this outcome.
+
+        The table's names are outcomes, not operations: `signed` is the same picture whether the
+        signing came from a button, the menu or a worker thread. What the character is for is the
+        answer, so one state per answer.
+        """
+        if not hasattr(self, "character"):
+            return
+        name = self._state_map().get(state, "")
+        if not name:
+            return
+        path = asset_path("mark", name)
+        if not path:
+            return
+        try:
+            image = tk.PhotoImage(file=path)
+        except tk.TclError:
+            return
+        # A smaller copy for the panel: the tiles are around 300 pixels tall and the result strip is
+        # not, and `subsample` is the one scaling Tk does without an imaging library. Whole-number
+        # only, so it is 2 or 3 and not 2.5.
+        wanted = 150
+        factor = max(1, round(image.height() / wanted))
+        if factor > 1:
+            image = image.subsample(factor, factor)
+        self.character.configure(image=image)
+        self.character.image = image      # Tk holds only a weak reference
+        self.character_state = state
+
     # --- small helpers -------------------------------------------------------- #
 
     def _browse_repo(self) -> None:
@@ -846,13 +910,21 @@ class Window:
             pass
         self.root.after(100, self._drain)
 
-    def _run(self, work, done) -> None:
-        """Run something slow without freezing the window."""
+    def _run(self, work, done, announce: bool = True) -> None:
+        """Run something slow without freezing the window.
+
+        `announce` is for the work the window starts by itself. The first thing it does on opening is
+        read the certificate store, which is genuinely slow and genuinely work -- but putting the
+        character into "working" before the window has drawn once means a person opening the tool
+        sees it busy and never sees it idle, and idle is what it actually is at that moment.
+        """
         if self.busy:
             return
         self.busy = True
         self._set_buttons("disabled")
         self.status.configure(text=self.t(i18n_key="status.working"))
+        if announce:
+            self.show_state("working")
 
         def runner():
             try:
@@ -893,7 +965,7 @@ class Window:
                 self.cert_note.configure(
                     text=self.t(i18n_key="cert.expires", days=chosen.days_left()) + "; " + issued)
 
-        self._run(certs.list_certificates, done)
+        self._run(certs.list_certificates, done, announce=False)
 
     def _chosen_certificate(self) -> certs.Certificate | None:
         wanted = self.certificate.get()
@@ -969,25 +1041,18 @@ class Window:
         neither file is beside the build the heading simply has no picture; a missing decoration is
         not a reason for the window to fail.
         """
-        roots = [os.path.dirname(os.path.dirname(os.path.abspath(__file__)))]
-        bundled = getattr(sys, "_MEIPASS", "")
-        if bundled:
-            roots.append(bundled)
-        if getattr(sys, "frozen", False):
-            roots.append(os.path.dirname(sys.executable))
-        for root in roots:
-            for name in ("chibi-about.png", "onlysign-256.png", "onlysign.png"):
-                path = os.path.join(root, "mark", name)
-                if not os.path.isfile(path):
-                    continue
-                try:
-                    # Tk 8.6 and later read PNG directly, so no imaging library is needed for this.
-                    image = tk.PhotoImage(file=path)
-                except tk.TclError:
-                    continue
-                label = ttk.Label(parent, image=image)
-                label.image = image          # Tk holds only a weak reference; keep one here
-                return label
+        for name in ("chibi-about.png", "onlysign-256.png", "onlysign.png"):
+            path = asset_path("mark", name)
+            if not path:
+                continue
+            try:
+                # Tk 8.6 and later read PNG directly, so no imaging library is needed for this.
+                image = tk.PhotoImage(file=path)
+            except tk.TclError:
+                continue
+            label = ttk.Label(parent, image=image)
+            label.image = image          # Tk holds only a weak reference; keep one here
+            return label
         return None
 
     def on_about(self) -> None:
@@ -1201,6 +1266,7 @@ class Window:
             self._finish(payload)
             kind, value = payload
             if kind == "failed":
+                self.show_state("failed")
                 self.say(self.t(i18n_key="say.sign_failed", error=value), "bad")
                 return
             self.say(self.t(i18n_key="say.ledger", path=plan.ledger_at()), "quiet")
@@ -1208,8 +1274,10 @@ class Window:
                 self.say(line, "bad" if value.failed else "")
             self.say("")
             if value.failed:
+                self.show_state("failed")
                 self.say(self.t(i18n_key="signing_failed"), "bad")
             else:
+                self.show_state("signed")
                 self.say(ascii_banner(), "good")
 
         self._run(lambda: workflow.execute(plan, dry_run=False), done)
@@ -1232,6 +1300,7 @@ class Window:
                 if finding.replaced_by:
                     self.say(self.t(i18n_key="audit.replaced_by",
                                     when=str(finding.replaced_by.get("t"))[:19]), "quiet")
+            self.show_state("changed" if value.needing_attention() else "unchanged")
             self.say(self._audit_summary(value),
                      "bad" if value.needing_attention() else "good")
 
@@ -1249,6 +1318,31 @@ TRUST_KEYS = {
 }
 
 
+def asset_dirs() -> list[str]:
+    """Every place a picture or a data file might be, nearest first.
+
+    Three callers need this and they must agree: the icon the window wears, the figure the About box
+    shows, and the character that reacts to an outcome. They used to each walk the same list of
+    candidate roots, which is three places for one of them to be updated and two to be forgotten.
+    """
+    roots = [os.path.dirname(os.path.dirname(os.path.abspath(__file__)))]
+    bundled = getattr(sys, "_MEIPASS", "")
+    if bundled:
+        roots.append(bundled)
+    if getattr(sys, "frozen", False):
+        roots.append(os.path.dirname(sys.executable))
+    return roots
+
+
+def asset_path(*parts: str) -> str:
+    """The first existing file among the candidate roots, or an empty string."""
+    for root in asset_dirs():
+        candidate = os.path.join(root, *parts)
+        if os.path.isfile(candidate):
+            return candidate
+    return ""
+
+
 def install_window_icon(root: tk.Tk) -> bool:
     """Put the application's face on the window, which nothing was doing before.
 
@@ -1259,22 +1353,15 @@ def install_window_icon(root: tk.Tk) -> bool:
     The same file the executable uses, so there is one face: `onlysign-256.png`, the square crop.
     A missing picture is not a reason to fail to start, so this reports rather than raises.
     """
-    roots = [os.path.dirname(os.path.dirname(os.path.abspath(__file__)))]
-    bundled = getattr(sys, "_MEIPASS", "")
-    if bundled:
-        roots.append(bundled)
-    if getattr(sys, "frozen", False):
-        roots.append(os.path.dirname(sys.executable))
-    for where in roots:
-        for name in ("onlysign-256.png", "onlysign.png"):
-            path = os.path.join(where, "mark", name)
-            if not os.path.isfile(path):
-                continue
-            try:
-                root.iconphoto(True, tk.PhotoImage(file=path))
-            except tk.TclError:
-                continue
-            return True
+    for name in ("onlysign-256.png", "onlysign.png"):
+        path = asset_path("mark", name)
+        if not path:
+            continue
+        try:
+            root.iconphoto(True, tk.PhotoImage(file=path))
+        except tk.TclError:
+            continue
+        return True
     return False
 
 
@@ -1285,6 +1372,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tabs", action="store_true",
                         help="print the pages the window offers, so a built executable can be "
                              "asked what is inside it rather than assumed to carry it")
+    parser.add_argument("--geometry", action="store_true",
+                        help="print where the window put itself and where the pieces landed, so a "
+                             "packaged build can be asked rather than photographed")
+    parser.add_argument("--geometry-after", type=float, default=0.0,
+                        help="with --geometry, also report again after this many seconds of a real "
+                             "event loop: a window that sizes itself and is then resized would "
+                             "otherwise never be caught")
     parser.add_argument("--settings", default="", help="where the window remembers things")
     parser.add_argument("--lang", default="", help="zh, en or ja")
     args = parser.parse_args(argv)
@@ -1302,6 +1396,39 @@ def main(argv: list[str] | None = None) -> int:
     if not install_window_icon(root):
         print("note: no icon file was found, so the window opens with Tk's own")
     window = Window(root, settings)
+    if args.geometry:
+        root.update_idletasks()
+        root.update()
+        pieces = {"notebook": window.notebook, "report": window.report,
+                  "character": window.character}
+        print(f"screen      : {root.winfo_screenwidth()}x{root.winfo_screenheight()}")
+        print(f"window      : {root.winfo_width()}x{root.winfo_height()}"
+              f"+{root.winfo_x()}+{root.winfo_y()}")
+        print(f"requested   : {root.winfo_reqwidth()}x{root.winfo_reqheight()}")
+        for name, widget in pieces.items():
+            print(f"  {name:<10} x={widget.winfo_x():<5} y={widget.winfo_y():<5} "
+                  f"{widget.winfo_width()}x{widget.winfo_height()}  "
+                  f"mapped={bool(widget.winfo_ismapped())}")
+        image = getattr(window.character, "image", None)
+        print(f"  character  : state={getattr(window, 'character_state', None)!r} "
+              f"image={'none' if image is None else f'{image.width()}x{image.height()}'}")
+        if args.geometry_after > 0:
+            def later() -> None:
+                print(f"after {args.geometry_after}s of a real loop:")
+                print(f"  window     : {root.winfo_width()}x{root.winfo_height()}"
+                      f"+{root.winfo_x()}+{root.winfo_y()}")
+                for name, widget in (("notebook", window.notebook), ("report", window.report),
+                                     ("character", window.character)):
+                    print(f"  {name:<10} x={widget.winfo_x():<5} "
+                          f"{widget.winfo_width()}x{widget.winfo_height()}  "
+                          f"mapped={bool(widget.winfo_ismapped())}")
+                root.destroy()
+
+            root.after(int(args.geometry_after * 1000), later)
+            root.mainloop()
+            return 0
+        root.destroy()
+        return 0
     if args.tabs:
         # Asked of the window, not read off this file: a page that was written and never added to
         # the notebook is a page nobody can reach, and that is exactly what a build log cannot see.
@@ -1329,9 +1456,17 @@ def main(argv: list[str] | None = None) -> int:
         art = window._about_mark(root)
         picture = (f"{art.image.width()}x{art.image.height()}" if art is not None
                    else "absent, and the About window goes without it")
+        # The character and the state map travel as data, and a missing data file is not a build
+        # error -- it is a window that quietly shows nothing. So a packaged build is asked what it
+        # actually loaded rather than being assumed to have it.
+        states = window._state_map()
+        drawn = getattr(window, "character_state", "")
+        character = (f"{len(states)} state(s), showing {drawn!r}" if states
+                     else "no state map, so no character")
         pages = [window.notebook.tab(index, "text") for index in range(window.notebook.index("end"))]
         root.destroy()
         print(f"the window was built, switched language twice, and closed; mark {picture}")
+        print(f"character: {character}")
         print("pages: " + ", ".join(pages))
         return 0
     root.mainloop()

@@ -281,7 +281,40 @@ def main() -> int:
         print(f"icon: {len(generated)} file(s) from {icon_source.name} -- "
               + ", ".join(entry["file"] for entry in generated))
 
-    # --- the chibi, which is what the tool shows about itself ------------------ #
+    # --- what the window shows while it works and after it stops ---------------- #
+    #
+    # The mapping is here, in one table, rather than in the window as a set of file names the window
+    # has to know. A window that names files is a window that breaks when a file is renamed; a table
+    # beside the art is checked by the same script that writes the art, and it can be seen in one
+    # place what each state looks like.
+    #
+    # The rule behind the choices: a state gets the pose whose *expression* fits it, not the pose
+    # whose props fit it. That is what CrystalDiskInfo does -- its good and bad art are two different
+    # drawings of the same character, one smiling and one grimacing, not one drawing recoloured -- and
+    # it is the difference between a picture that tells you something at a glance and a decoration.
+    states = {
+        "idle": "standing-book",     # waiting: holding the ledger, which is what this tool is
+        "working": "reading",        # something is happening and it is not yours to interrupt
+        "signed": "staff-cast",      # it worked
+        "failed": "cauldron",        # it did not, and something is smoking
+        "unchanged": "standing-book",  # the ledger agrees with the disk
+        "changed": "whisk",           # a file changed by something the ledger has no record of --
+                                      # the one state that should look like somebody has been at it
+        "unsigned": "surprised",      # a signature that was there is not
+        "gone": "asleep",             # the file the record names is not there to check
+        "refused": "curious",         # not an error: this format should be signed, not marked
+    }
+    by_name = {tile["name"]: tile["file"] for tile in result["tiles"]}
+    chosen = {}
+    for state, pose in states.items():
+        if pose not in by_name:
+            print(f"  note: no pose named {pose!r} for the {state} state; it will have no picture")
+            continue
+        chosen[state] = by_name[pose]
+    (out / "states.json").write_text(json.dumps(chosen, indent=2), encoding="utf-8")
+    result["states"] = chosen
+    print(f"states: {len(chosen)} of {len(states)} mapped to a pose -- "
+          + ", ".join(sorted(chosen)))
     #
     # Two things are wanted from the chibi and they are different sizes of it. The icon is the
     # finished crop the publisher made, which is a close-up and reads at 16 pixels; this is the whole

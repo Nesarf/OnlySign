@@ -356,6 +356,27 @@ def main() -> int:
                 if short not in window.pages:
                     raise AssertionError(f"{key} is declared and no such page was built")
 
+        def the_character_answers_every_outcome():
+            # The character is the window's answer to "what happened", so every outcome the map names
+            # has to reach a picture that exists. A state with no picture is the window saying nothing
+            # at the moment it most needs to say something, and it would look exactly like a state the
+            # map had not been updated for.
+            states = window._state_map()
+            truthy(states, "no state map was loaded, so the character never changes")
+            for state, name in states.items():
+                window.show_state(state)
+                root.update_idletasks()
+                image = getattr(window.character, "image", None)
+                if image is None or image.width() < 8:
+                    raise AssertionError(f"the {state!r} state drew nothing (file {name!r})")
+                if getattr(window, "character_state", "") != state:
+                    raise AssertionError(f"the {state!r} state did not take")
+            # And an outcome with no entry leaves the last picture alone rather than blanking it.
+            window.show_state("no-such-outcome")
+            truthy(getattr(window.character, "image", None) is not None,
+                   "an unknown outcome blanked the character")
+            window.show_state("idle")
+
         def the_window_wears_the_application_face():
             # Until this existed the window showed Tk's own feather while the executable carried the
             # application's icon -- two faces for one program, and the wrong one on screen while it
@@ -391,6 +412,7 @@ def main() -> int:
         check("every page the window declares can be reached",
               every_page_declared_is_a_page_that_can_be_reached)
         check("the window wears the application face", the_window_wears_the_application_face)
+        check("the character answers every outcome", the_character_answers_every_outcome)
 
         root.destroy()
     finally:
@@ -402,7 +424,7 @@ def main() -> int:
         shutil.rmtree(scratch, ignore_errors=True)
 
     print()
-    total = 14
+    total = 15
     line = f"{total - failures - untested}/{total} check(s) passed"
     if untested:
         line += f", {untested} not tested"

@@ -185,16 +185,20 @@ def main(argv: list[str] | None = None) -> int:
         "--specpath", work,
     ]
     arguments.append("--console" if args.console else "--windowed")
-    # The notice travels inside the build. Its mark is content, not code, so it is a data file --
-    # and a packaged tool that could not introduce itself would be a worse tool than the checkout.
-    for extra in (os.path.join(ROOT, "NOTICE.txt"),
-                  os.path.join(ROOT, "mark", "onlysign-256.png"),
-                  os.path.join(ROOT, "mark", "chibi-about.png")):
+    # Everything in mark/ travels inside the build: the icon the executable wears, the pictures the
+    # window draws, the state map that says which picture goes with which outcome, and the typeface.
+    # Listed by walking the directory rather than by naming files, because naming them is how one
+    # gets left out -- and a picture that is missing from a packaged build is not a build error, it is
+    # a window that quietly shows nothing where the character should be.
+    mark_dir = os.path.join(ROOT, "mark")
+    data_files = [os.path.join(ROOT, "NOTICE.txt")]
+    for name in sorted(os.listdir(mark_dir)):
+        path = os.path.join(mark_dir, name)
+        if os.path.isfile(path):
+            data_files.append(path)
+    for extra in data_files:
         if os.path.isfile(extra):
-            # The notice's text, and the mark the About window shows in colour. Both are content,
-            # so both travel as data rather than being written into the code.
-            arguments += ["--add-data", extra + os.pathsep + os.path.relpath(os.path.dirname(extra), ROOT)
-                          if extra.endswith(".png") else extra + os.pathsep + "."]
+            arguments += ["--add-data", extra + os.pathsep + os.path.relpath(os.path.dirname(extra), ROOT)]
         else:
             print(f"note: {os.path.basename(extra)} is missing; the build will go without it")
     if args.no_icon:

@@ -1,0 +1,11 @@
+{
+  "idle": "chibi-03-standing-book.png",
+  "working": "chibi-07-reading.png",
+  "signed": "chibi-02-staff-cast.png",
+  "failed": "chibi-15-cauldron.png",
+  "unchanged": "chibi-03-standing-book.png",
+  "changed": "chibi-16-whisk.png",
+  "unsigned": "chibi-08-surprised.png",
+  "gone": "chibi-06-asleep.png",
+  "refused": "chibi-04-curious.png"
+}

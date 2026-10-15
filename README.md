@@ -38,7 +38,7 @@ python -m onlysign.gui                          # the window
 python OnlySign.py                              # the same window, through the packaged entry point
 python -m onlysign selftest                     # run the engine against itself: 52 checks
 python -m onlysign selftest --keep              # leave the scratch directory behind to look at
-python tools/gui_smoke.py                       # drive the window the way a person would: 13 checks
+python tools/gui_smoke.py                       # drive the window the way a person would: 15 checks
 
 python -m onlysign scan  <project>              # propose artifacts, with the reason for each
 python -m onlysign certs                        # what could sign
@@ -198,7 +198,7 @@ attached. `onlysign check` afterwards reports it `UNCHANGED` against the ledger 
 
 ## The face it wears
 
-Four files in `mark/`, and they are not interchangeable.
+Five things in `mark/` decide how the tool looks, and they are not interchangeable.
 
 | file | what it is | where it is used |
 |---|---|---|
@@ -206,16 +206,40 @@ Four files in `mark/`, and they are not interchangeable.
 | `onlysign-256.png` | the same crop, square | the window's own icon, title bar and taskbar |
 | `chibi-about.png` | the whole figure | the About window |
 | `onlysign.png` | the crop at 512 | the fallback when the others are missing |
+| `states.json` + eight pose files | what the character does | the result of every action |
 
-The split is deliberate. A close-up face is what an icon should be -- it survives being sixteen
-pixels wide -- while a whole figure at sixteen pixels is a smudge with a hat on it, and a close-up in
-an About box says less than the character does. One is the file; the other is the identity.
+The split between the close-up and the chibi is deliberate. A close-up face is what an icon should be
+-- it survives being sixteen pixels wide -- while a whole figure at sixteen pixels is a smudge with a
+hat on it, and a close-up in an About box says less than the character does. One is the file; the
+other is the identity.
+
+**The character in the result box answers what happened.** Nine outcomes, nine poses, and the rule
+for choosing a pose is that it matches the *expression*, not the props: this is what CrystalDiskInfo
+does, whose good and bad art are two different drawings of one character, one smiling and one
+grimacing, rather than one drawing recoloured. A picture whose expression matches the outcome tells
+you something before you read the text; a recoloured icon does not.
+
+| outcome | pose | why |
+|---|---|---|
+| idle | holding the book | a signer with a ledger, and idle is a state rather than the absence of one |
+| working | reading | busy, and not yours to interrupt |
+| signed | staff cast | it worked |
+| failed | the cauldron | it did not, and something is smoking |
+| unchanged | holding the book | the ledger agrees with the disk |
+| changed | the whisk | the one outcome that should look like somebody has been at it |
+| unsigned | surprised | a signature that was there is not |
+| gone | asleep | the file the record names is not there to check |
+| refused | curious | not an error: this format should be signed, not marked |
+
+Which pose goes with which outcome is `mark/states.json`, written by the art tool and read by the
+window -- not a list of file names in the window, because a window that names files is a window that
+breaks when one is renamed, and changing what "signed" looks like should be a change to the art.
 
 **The window used to have no icon at all.** It showed Tk's own feather while the executable carried
 the right one: two faces for one program, and the wrong one on screen while it ran.
-`install_window_icon` sets it from the same PNG the packaging uses, and a check in
-`tools/gui_smoke.py` fails when that picture cannot be found -- seen failing, with the files moved
-aside, before it was kept.
+`install_window_icon` sets it from the same PNG the packaging uses. Two checks in
+`tools/gui_smoke.py` guard this -- one that the picture is found, one that every outcome in the map
+reaches a picture -- and both were seen failing, with the files moved aside, before they were kept.
 
 They are generated rather than hand-made:
 
@@ -364,7 +388,7 @@ onlysign/selftest.py         52 checks of the engine, in a scratch directory
 tools/build.py               building the one-file executable
 tools/build-msi.py           building the installer, out of the executables that build made
 installer/onlysign.wxs       the installer's authoring; the publisher in it is a token
-tools/gui_smoke.py           13 checks that drive the window itself
+tools/gui_smoke.py           15 checks that drive the window itself
 tools/cfb-probe.py           what a compound file's header says, against what the reader returned
 tools/boot-check.py          boots the mark sector on real firmware (needs QEMU; not a check)
 dist/                        built executables and installer (not committed)
@@ -527,7 +551,7 @@ Built and checked at every level:
 | what | how it is checked |
 |---|---|
 | the engine | `python -m onlysign selftest` -- 52 checks, in a scratch directory |
-| the window | `python tools/gui_smoke.py` -- 13 checks that open it and press its buttons |
+| the window | `python tools/gui_smoke.py` -- 15 checks that open it and press its buttons |
 | both PowerShell editions | the same 52 checks under Windows PowerShell and under PowerShell 7 |
 | the executable | about 13 MB, one file: lists certificates, answers `scan --help`, opens its window |
 | reading a container | `python tools/cfb-probe.py <dir>` -- every compound file in it, against its own header |
