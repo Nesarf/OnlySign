@@ -3,6 +3,8 @@ name = "onlysign"
 version = "0.1.0"
 description = "Sign local build artifacts, and be able to say later what was signed."
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.10"
 # Empty on purpose, and it should stay that way: the tool is meant to run on a machine that has
 # nothing installed. tkinter, hashlib, json and ctypes all ship with Python, and the signing itself

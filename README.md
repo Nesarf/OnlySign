@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # OnlySign
 
 Sign local build artifacts, and be able to say later what was signed.
@@ -409,6 +411,25 @@ It is a script rather than a thirtieth-something check for the same reason `term
 it needs something a normal run does not have, and a suite that quietly skips checks on a machine
 without QEMU would be worse than one that does not make the claim. QEMU is optional; the suite's
 coverage does not change with it.
+
+## Licence
+
+Apache-2.0. The full text is in [LICENSE](LICENSE) and is carried **unmodified**, appendix and all:
+Apache-2.0 asks for that, and its own appendix says where the holder and the year belong -- a NOTICE
+file, which is [NOTICE](NOTICE). The copyright line is there rather than in the licence, and that is
+not a stylistic choice.
+
+Why this section exists at all: the repository had no licence for its whole life until this was
+written, and **no licence does not mean "free to use"** -- it means all rights reserved. A tool whose
+entire purpose is to be run on other people's machines was, in the only sense that legally counts,
+not usable by anyone. Saying nothing is worse than choosing wrongly, because a reader fills the
+silence with whatever they find convenient.
+
+The bundled typeface in `mark/fonts/` is Cinzel, under the SIL Open Font License 1.1, and carries its
+own terms as `mark/fonts/OFL.txt`; the Apache License above does not cover it. Everything else --
+the tool, the engine, the window, the mark carriers -- is under Apache-2.0, including the explicit
+patent grant, which is the part of it that matters for something meant to be embedded in somebody
+else's build.
 
 ## Status
 
