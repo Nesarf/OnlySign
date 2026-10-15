@@ -18,6 +18,7 @@ import argparse
 import json
 from pathlib import Path
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -113,6 +114,33 @@ def write_version_file(identity: dict, target: str) -> str:
     return str(out)
 
 
+def declared_project_version() -> str:
+    """The version pyproject.toml declares, without needing a TOML parser for one string."""
+    text = (Path(ROOT) / "pyproject.toml").read_text(encoding="utf-8")
+    found = re.search(r'^version\s*=\s*"([^"]+)"', text, re.MULTILINE)
+    return found.group(1) if found else ""
+
+
+def check_version_agreement(identity: dict) -> None:
+    """Refuse to build a binary whose version disagrees with the package it belongs to.
+
+    There were two numbers: the executable's, from the identity file, and pyproject.toml's. They had
+    already drifted -- the binary said 1.0.0 while the package said 0.1.0 -- and a third number was
+    about to appear in the installer, which reads its version *from the binary* precisely so that
+    this stays one number. A version that is written down twice is a version that is wrong once, so
+    the disagreement stops the build rather than being discovered later from a support question.
+    """
+    declared = declared_project_version()
+    wanted = identity.get("version", "")
+    if not declared or not wanted:
+        return
+    if declared != wanted:
+        raise SystemExit(
+            f"version disagreement: pyproject.toml says {declared}, the identity says {wanted}.\n"
+            f"The executable and the installer both take their version from the identity, so "
+            f"pyproject.toml has to say the same thing. Change one of them.")
+
+
 def pyinstaller_version(python: str) -> str:
     proc = subprocess.run(
         [python, "-c", "import PyInstaller; print(PyInstaller.__version__)"],
@@ -175,6 +203,7 @@ def main(argv: list[str] | None = None) -> int:
         # The typeface travels as data too, and is registered for this process only when it runs.
         arguments += ["--add-data", font_dir + os.pathsep + os.path.join("mark", "fonts")]
     identity = identity_from(args.identity or os.path.join(ROOT, "IDENTITY.local.json"))
+    check_version_agreement(identity)
     version_file = write_version_file(identity, os.path.join(ROOT, "build", "version_info.txt"))
     arguments += ["--version-file", version_file]
     # The copyright belongs in the file, not only beside it: somebody who opens the properties of

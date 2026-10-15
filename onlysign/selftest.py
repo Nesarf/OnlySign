@@ -1229,6 +1229,27 @@ def main() -> int:
     check("every tab string names a page, in every language",
           every_tab_string_names_a_declared_page)
 
+    def the_version_is_written_down_once():
+        # There were two numbers and they had drifted: the executables (and therefore the installer,
+        # which reads its version from them) said 1.0.0 while pyproject.toml said 0.1.0. A third was
+        # about to appear in the installer. This is the check that would have caught it, and it reads
+        # the same two files `tools/build.py` refuses to build across.
+        import re
+        declared = re.search(r'^version\s*=\s*"([^"]+)"',
+                             (ROOT / "pyproject.toml").read_text(encoding="utf-8"),
+                             re.MULTILINE)
+        truthy(declared, "pyproject.toml declares no version")
+        identity_path = ROOT / "IDENTITY.local.json"
+        if not identity_path.is_file():
+            raise NotTested(
+                "IDENTITY.local.json is gitignored and absent, which is the published state: there "
+                "is no second version to disagree with")
+        identity = json.loads(identity_path.read_text(encoding="utf-8"))
+        same(declared.group(1), str(identity.get("version", "")),
+             "the version in pyproject.toml against the one the binaries are built with")
+
+    check("the version is written down in one place", the_version_is_written_down_once)
+
     # --- cleaning up after itself --------------------------------------------- #
     if throwaway is not None:
         ps.call("Get-ChildItem ('Cert:\\CurrentUser\\My\\' + " + ps.literal(throwaway.thumbprint) +

@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The installer for the window and the command line, as one MSI.
+
+  Two things about this file are deliberate and worth stating where somebody editing it will read
+  them.
+
+  **The publisher is a token.** `__PRODUCT__`, `__MAKER__`, `__DESCRIPTION__` and `__VERSION__` are
+  filled in by `tools/build-msi.py` from a local identity file, and the values in this file are the
+  neutral ones a published tool ships with. The repository is public; whose it is, is an input. This
+  is the same rule the build and the mark command follow, applied to the installer.
+
+  **The upgrade code is a constant, and the product code is not.** WiX generates a fresh product
+  code per build, which is what makes an upgrade an upgrade rather than a second parallel copy; the
+  upgrade code is what tells Windows the two are the same product. Changing the upgrade code would
+  make every future version install *beside* this one instead of replacing it.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package
+      Name="__PRODUCT__"
+      Manufacturer="__MAKER__"
+      Version="__VERSION__"
+      UpgradeCode="__UPGRADE_CODE__"
+      Scope="perMachine"
+      Language="1033"
+      Codepage="65001"
+      InstallerVersion="500"
+      Compressed="yes">
+
+    <SummaryInformation
+        Description="__DESCRIPTION__"
+        Manufacturer="__MAKER__" />
+
+    <!-- An upgrade replaces the old one. Without this, installing a second version leaves two in
+         Add or Remove Programs and the shortcut pointing at whichever was written last. -->
+    <MajorUpgrade
+        AllowSameVersionUpgrades="yes"
+        DowngradeErrorMessage="A newer version of __PRODUCT__ is already installed." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <Property Id="ARPPRODUCTICON" Value="OnlySignIcon" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/Nesarf/OnlySign" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+
+    <Icon Id="OnlySignIcon" SourceFile="__ICON__" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="__FOLDER__" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppShortcutFolder" Name="__FOLDER__" />
+    </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder" />
+
+    <Feature Id="Main" Title="__PRODUCT__" Level="1">
+      <!-- The window: this is what a person double-clicks. -->
+      <Component Id="WindowExe" Guid="b53c3e09-d33f-40d6-8327-f176f7ed6298" Directory="INSTALLFOLDER">
+        <File Id="OnlySignExe" Source="__WINDOW_EXE__" KeyPath="yes" />
+        <Shortcut Id="StartMenuShortcut"
+                  Directory="AppShortcutFolder"
+                  Name="__PRODUCT__"
+                  Description="__DESCRIPTION__"
+                  Target="[INSTALLFOLDER]OnlySign.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="OnlySignIcon" />
+        <Shortcut Id="DesktopShortcut"
+                  Directory="DesktopFolder"
+                  Name="__PRODUCT__"
+                  Description="__DESCRIPTION__"
+                  Target="[INSTALLFOLDER]OnlySign.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="OnlySignIcon" />
+      </Component>
+
+      <!-- The console build, beside it rather than on the PATH. A signing tool that quietly adds
+           itself to every shell on the machine is a different product. -->
+      <Component Id="ConsoleExe" Guid="b2fa1493-ee8b-4bd2-9746-5bb6387f55d6" Directory="INSTALLFOLDER">
+        <File Id="OnlySignConsoleExe" Source="__CONSOLE_EXE__" KeyPath="yes" />
+      </Component>
+
+      <!-- The licence, so the terms travel with the installed product rather than only with the
+           repository it was downloaded from. -->
+      <Component Id="LicenceFiles" Guid="4c3c84e0-f730-4966-81e6-0aed50bb0600" Directory="INSTALLFOLDER">
+        <File Id="LicenceFile" Source="__LICENSE__" KeyPath="yes" />
+        <File Id="NoticeFile" Source="__NOTICE__" />
+      </Component>
+    </Feature>
+
+    <!-- The interface. Minimal rather than the full dialog set: a licence to accept, a directory,
+         and a progress bar. Every extra page is a page somebody clicks through without reading. -->
+    <WixVariable Id="WixUILicenseRtf" Value="__LICENSE_RTF__" />
+    <ui:WixUI Id="WixUI_Minimal" />
+  </Package>
+</Wix>

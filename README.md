@@ -36,7 +36,7 @@ From a checkout, without building anything:
 ```powershell
 python -m onlysign.gui                          # the window
 python OnlySign.py                              # the same window, through the packaged entry point
-python -m onlysign selftest                     # run the engine against itself: 51 checks
+python -m onlysign selftest                     # run the engine against itself: 52 checks
 python -m onlysign selftest --keep              # leave the scratch directory behind to look at
 python tools/gui_smoke.py                       # drive the window the way a person would: 13 checks
 
@@ -158,6 +158,44 @@ makes it testable -- an executable that only opens a window is one that cannot b
 script. Note that a one-file build starts a bootloader which then starts the real process, so the
 process id you get from launching it is not the one that owns the window.
 
+## Building the installer
+
+```powershell
+python tools/build-msi.py --identity IDENTITY.local.json   # dist/OnlySign-1.0.0.0.msi
+```
+
+An MSI, built with WiX from the executables `tools/build.py` has already produced. It installs both
+of them under `Program Files`, a Start Menu shortcut and a desktop shortcut for the window, the
+licence and the notice beside them, and it removes all of it cleanly -- verified by installing and
+uninstalling rather than by reading the authoring. The console build is installed beside the window
+and **not added to the PATH**: a signing tool that quietly puts itself into every shell on the
+machine is a different product.
+
+Three things about it are decisions rather than details.
+
+**The publisher in it is a token.** `installer/onlysign.wxs` ships with neutral values and
+`tools/build-msi.py` fills them from a local identity file, so the repository says `OnlySign` /
+`its publisher` while a build made with an identity says whose it is. The same rule the executable
+build and the mark command follow.
+
+**The version is read out of the executable**, not written down again. WiX wants four numbers and
+no letters, and an installer that says one version while the thing it installed says another is a
+support question with no answer, so the build asks `OnlySign.exe` what version it is. `tools/build.py`
+in turn refuses to build when that disagrees with `pyproject.toml` -- which it did: the binaries said
+1.0.0 while the package said 0.1.0. A version written down twice is a version that is wrong once.
+
+**The licence page shows the licence that is shipped.** The RTF is generated from `LICENSE`, escaped
+rather than retyped: a second copy of the terms is a second copy that can drift, and a licence page
+showing something other than the licence is worse than no licence page.
+
+WiX's UI extension is a separate download and is **not committed** -- it is a third-party binary.
+`tools/build-msi.py` says where it expects to find it and how to get it if it is not there.
+
+**The installer is signed by this tool, itself.** That is the point of it: the MSI's signature is
+carried inside the package as a `DigitalSignature` stream rather than as a detached catalogue file,
+which is the carrier the engine reads, and Windows reports it as `Valid` with the timestamp
+attached. `onlysign check` afterwards reports it `UNCHANGED` against the ledger record it wrote.
+
 ## Finding the artifacts
 
 A scanner that returns a list of paths is not much use on its own -- the person reading it has no way
@@ -273,12 +311,14 @@ onlysign/engine/bootmark.py  a mark in 512 bytes, for the machines that cannot v
 onlysign/mark.py             the mark line, and the carriers the verb puts it in
 onlysign/gui.py              the window; layout and a worker thread, nothing else
 onlysign/cli.py              the engine with a keyboard instead of a window
-onlysign/selftest.py         51 checks of the engine, in a scratch directory
+onlysign/selftest.py         52 checks of the engine, in a scratch directory
 tools/build.py               building the one-file executable
+tools/build-msi.py           building the installer, out of the executables that build made
+installer/onlysign.wxs       the installer's authoring; the publisher in it is a token
 tools/gui_smoke.py           13 checks that drive the window itself
 tools/cfb-probe.py           what a compound file's header says, against what the reader returned
 tools/boot-check.py          boots the mark sector on real firmware (needs QEMU; not a check)
-dist/                        built executables (not committed)
+dist/                        built executables and installer (not committed)
 ```
 
 ## A mark, and where it does not belong
@@ -437,9 +477,9 @@ Built and checked at every level:
 
 | what | how it is checked |
 |---|---|
-| the engine | `python -m onlysign selftest` -- 51 checks, in a scratch directory |
+| the engine | `python -m onlysign selftest` -- 52 checks, in a scratch directory |
 | the window | `python tools/gui_smoke.py` -- 13 checks that open it and press its buttons |
-| both PowerShell editions | the same 51 checks under Windows PowerShell and under PowerShell 7 |
+| both PowerShell editions | the same 52 checks under Windows PowerShell and under PowerShell 7 |
 | the executable | about 13 MB, one file: lists certificates, answers `scan --help`, opens its window |
 | reading a container | `python tools/cfb-probe.py <dir>` -- every compound file in it, against its own header |
 

@@ -25,3 +25,7 @@ NOTICE.local*.txt
 
 # The names a build belongs to: theirs, never the published tool.
 IDENTITY.local.json
+
+# WiX's UI extension, which the installer needs and which nobody should commit: it is a third-party
+# binary from nuget.org. `tools/build-msi.py` names the path it expects and how to get it.
+installer/extensions/
