@@ -196,6 +196,55 @@ carried inside the package as a `DigitalSignature` stream rather than as a detac
 which is the carrier the engine reads, and Windows reports it as `Valid` with the timestamp
 attached. `onlysign check` afterwards reports it `UNCHANGED` against the ledger record it wrote.
 
+## The face it wears
+
+Four files in `mark/`, and they are not interchangeable.
+
+| file | what it is | where it is used |
+|---|---|---|
+| `onlysign.ico` | the close-up, seven sizes | the executable, the installer, the file icon |
+| `onlysign-256.png` | the same crop, square | the window's own icon, title bar and taskbar |
+| `chibi-about.png` | the whole figure | the About window |
+| `onlysign.png` | the crop at 512 | the fallback when the others are missing |
+
+The split is deliberate. A close-up face is what an icon should be -- it survives being sixteen
+pixels wide -- while a whole figure at sixteen pixels is a smudge with a hat on it, and a close-up in
+an About box says less than the character does. One is the file; the other is the identity.
+
+**The window used to have no icon at all.** It showed Tk's own feather while the executable carried
+the right one: two faces for one program, and the wrong one on screen while it ran.
+`install_window_icon` sets it from the same PNG the packaging uses, and a check in
+`tools/gui_smoke.py` fails when that picture cannot be found -- seen failing, with the files moved
+aside, before it was kept.
+
+They are generated rather than hand-made:
+
+```powershell
+python tools/prepare-art.py --source "<the art directory>" --out .onlysign-art
+```
+
+which cuts the character sheet into its sixteen poses, writes the standing art, and writes the four
+files above. `.onlysign-art/` is gitignored; the four in `mark/` are committed, because an icon that
+exists on one machine is an icon nobody else can build.
+
+Two things about that script are worth knowing before changing it.
+
+**The sheet is cut where the background is, not at a quarter of the width.** Measured: the four
+columns are separated at x 292..324, 607..642 and 921..959, where an even division would guess 313,
+627 and 940 -- twenty pixels out, which is enough to slice a hat and leave it in the next tile. The
+rows are worse: one of their three separators is a *single* row of background at y=316, between cells
+of 310 and 300 rows. Nothing about "a quarter of 1254" finds that; something about "this row has no
+ink in it" does. A sheet whose separators do not partition it into equal pieces is refused rather
+than quartered on the assumption that it must be a grid.
+
+**Making the white background transparent cannot be lossless, and it is not the default.** A flat
+sheet stores one colour per pixel and no longer stores how much ink made it, so a pixel reading
+(200, 180, 210) is ambiguous between pale ink at full coverage and dark ink at low coverage. Measured:
+taking alpha out and putting the result on the colour this window actually paints, (240, 240, 240),
+moves the mid tones by about 25 of 255 per channel -- a washed-out character beside the same art on
+white. So the tiles keep their background, and `--drop-background` is there for a destination that
+really is white.
+
 ## Finding the artifacts
 
 A scanner that returns a list of paths is not much use on its own -- the person reading it has no way

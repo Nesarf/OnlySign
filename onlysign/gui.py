@@ -956,11 +956,17 @@ class Window:
     # --- about ---------------------------------------------------------------- #
 
     def _about_mark(self, parent):
-        """The application's own mark, in colour.
+        """The figure the window shows about itself.
+
+        The whole chibi, not the close-up crop the executable uses as its icon. The two are wanted
+        for different reasons and are different sizes of the same character: a close-up face reads at
+        sixteen pixels and says "this is the application", while a whole figure says "this is who it
+        is" -- and only the second belongs in an About box. The icon is looked for second, so a build
+        without the chibi still has something.
 
         A console cannot show this -- the notice's drawing is characters, one colour, because that is
-        what a console has -- but a window can, so the one place the real image appears is here. If
-        the file is not beside the build the heading simply has no picture; a missing decoration is
+        what a console has -- but a window can, so these are the places the real image appears. If
+        neither file is beside the build the heading simply has no picture; a missing decoration is
         not a reason for the window to fail.
         """
         roots = [os.path.dirname(os.path.dirname(os.path.abspath(__file__)))]
@@ -970,7 +976,7 @@ class Window:
         if getattr(sys, "frozen", False):
             roots.append(os.path.dirname(sys.executable))
         for root in roots:
-            for name in ("onlysign-256.png", "onlysign.png"):
+            for name in ("chibi-about.png", "onlysign-256.png", "onlysign.png"):
                 path = os.path.join(root, "mark", name)
                 if not os.path.isfile(path):
                     continue
@@ -1243,6 +1249,35 @@ TRUST_KEYS = {
 }
 
 
+def install_window_icon(root: tk.Tk) -> bool:
+    """Put the application's face on the window, which nothing was doing before.
+
+    Until this existed the window showed Tk's own feather in the title bar and the taskbar -- the
+    packaged executable had the right icon on its file, and then opened a window wearing a different
+    one. Two icons for one program, and the wrong one is the one on screen while it runs.
+
+    The same file the executable uses, so there is one face: `onlysign-256.png`, the square crop.
+    A missing picture is not a reason to fail to start, so this reports rather than raises.
+    """
+    roots = [os.path.dirname(os.path.dirname(os.path.abspath(__file__)))]
+    bundled = getattr(sys, "_MEIPASS", "")
+    if bundled:
+        roots.append(bundled)
+    if getattr(sys, "frozen", False):
+        roots.append(os.path.dirname(sys.executable))
+    for where in roots:
+        for name in ("onlysign-256.png", "onlysign.png"):
+            path = os.path.join(where, "mark", name)
+            if not os.path.isfile(path):
+                continue
+            try:
+                root.iconphoto(True, tk.PhotoImage(file=path))
+            except tk.TclError:
+                continue
+            return True
+    return False
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="onlysign-gui", description="The OnlySign window.")
     parser.add_argument("--check", action="store_true",
@@ -1264,6 +1299,8 @@ def main(argv: list[str] | None = None) -> int:
     except tk.TclError as exc:
         print(f"no display is available, so the window cannot open: {exc}")
         return 1
+    if not install_window_icon(root):
+        print("note: no icon file was found, so the window opens with Tk's own")
     window = Window(root, settings)
     if args.tabs:
         # Asked of the window, not read off this file: a page that was written and never added to

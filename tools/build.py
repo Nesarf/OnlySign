@@ -188,7 +188,8 @@ def main(argv: list[str] | None = None) -> int:
     # The notice travels inside the build. Its mark is content, not code, so it is a data file --
     # and a packaged tool that could not introduce itself would be a worse tool than the checkout.
     for extra in (os.path.join(ROOT, "NOTICE.txt"),
-                  os.path.join(ROOT, "mark", "onlysign-256.png")):
+                  os.path.join(ROOT, "mark", "onlysign-256.png"),
+                  os.path.join(ROOT, "mark", "chibi-about.png")):
         if os.path.isfile(extra):
             # The notice's text, and the mark the About window shows in colour. Both are content,
             # so both travel as data rather than being written into the code.

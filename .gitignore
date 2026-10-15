@@ -29,3 +29,9 @@ IDENTITY.local.json
 # WiX's UI extension, which the installer needs and which nobody should commit: it is a third-party
 # binary from nuget.org. `tools/build-msi.py` names the path it expects and how to get it.
 installer/extensions/
+
+# The prepared art: the character sheet cut into poses, the standing figure, and the icon files it
+# generates. Local, for the same reason the notices and the identity are -- the published tool is
+# neutral, and the art belongs to its publisher. What is committed is the four files in mark/ that a
+# build actually needs, not the working material behind them.
+.onlysign-art/

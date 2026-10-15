@@ -356,6 +356,24 @@ def main() -> int:
                 if short not in window.pages:
                     raise AssertionError(f"{key} is declared and no such page was built")
 
+        def the_window_wears_the_application_face():
+            # Until this existed the window showed Tk's own feather while the executable carried the
+            # application's icon -- two faces for one program, and the wrong one on screen while it
+            # ran. What is checked here is that a picture is found and Tk accepts it; whether it
+            # looks right was settled by photographing the running window, which is not a test.
+            truthy(gui.install_window_icon(root),
+                   "no icon file was found, so the window falls back to Tk's own")
+            # The About box shows the chibi figure, which is a different file from the icon on
+            # purpose: a close-up reads at sixteen pixels, a whole figure is what belongs in About.
+            found = window._about_mark(root)
+            try:
+                truthy(found is not None, "the About window found no picture at all")
+                size = (found.image.width(), found.image.height())
+                truthy(size[0] > 64 and size[1] > 64, f"the About picture is tiny: {size}")
+            finally:
+                if found is not None:
+                    found.destroy()
+
         check("the window offers the certificate the test made", certificate_is_listed)
         check("scanning fills the list from the project directory", scanning_fills_the_list)
         check("a dry run says what would happen and writes nothing", dry_run_says_what_would_happen)
@@ -372,6 +390,7 @@ def main() -> int:
         check("the signing buttons stay on their own page", the_signing_buttons_stay_on_their_own_page)
         check("every page the window declares can be reached",
               every_page_declared_is_a_page_that_can_be_reached)
+        check("the window wears the application face", the_window_wears_the_application_face)
 
         root.destroy()
     finally:
@@ -383,7 +402,7 @@ def main() -> int:
         shutil.rmtree(scratch, ignore_errors=True)
 
     print()
-    total = 13
+    total = 14
     line = f"{total - failures - untested}/{total} check(s) passed"
     if untested:
         line += f", {untested} not tested"
