@@ -1055,6 +1055,31 @@ class Window:
             return label
         return None
 
+    def _about_portrait(self, parent):
+        """The whole illustration, drawn beside the figure rather than instead of it.
+
+        A third picture, and it earns its place by being a different thing from either that is
+        already here: `onlysign-256.png` is a face that has to survive being sixteen pixels wide,
+        `chibi-about.png` is the character drawn as this window's own mascot, and this is the
+        illustration the repository page leads with. Replacing the figure with it would trade a
+        drawing made for a box this size for one made for a page.
+
+        The size is not negotiated here. `portrait-about.png` is written at the height of the chibi
+        by the art tool, because the two are packed in a row and a row of pictures that disagree
+        about their height reads as a mistake. If the file is absent the About box keeps the figure
+        and says nothing -- a missing decoration is not a reason for the window to fail.
+        """
+        path = asset_path("mark", "portrait-about.png")
+        if not path:
+            return None
+        try:
+            image = tk.PhotoImage(file=path)
+        except tk.TclError:
+            return None
+        label = ttk.Label(parent, image=image)
+        label.image = image
+        return label
+
     def on_about(self) -> None:
         from . import notice
         dialog = tk.Toplevel(self.root)
@@ -1062,9 +1087,15 @@ class Window:
         dialog.transient(self.root)
         body = ttk.Frame(dialog, padding=12)
         body.pack(fill="both", expand=True)
-        mark = self._about_mark(body)
+        figures = ttk.Frame(body)
+        mark = self._about_mark(figures)
+        portrait = self._about_portrait(figures)
         if mark is not None:
-            mark.pack(pady=(0, 8))
+            mark.pack(side="left", padx=(0, 12))
+        if portrait is not None:
+            portrait.pack(side="left")
+        if mark is not None or portrait is not None:
+            figures.pack(pady=(0, 8))
         ttk.Label(body, text=self.t(i18n_key="app.name"),
                   font=wordmark_font(i18n.FONT_SIZE + 8)).pack(anchor="w")
         banner = ttk.Label(body, text=ascii_banner(), font=wordmark_font(i18n.FONT_SIZE + 2))

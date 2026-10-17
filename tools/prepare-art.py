@@ -249,6 +249,10 @@ def main() -> int:
         # Nothing in the application reads this file. It is here because a repository whose
         # presentation says nothing about what the tool looks like is a repository that has kept its
         # best argument in a folder nobody opens.
+        #
+        # It belongs in `docs/`, not in `mark/`, and that is a rule rather than a preference: the build
+        # adds every file in `mark/` to the executable, because the window draws from there. A picture
+        # that only a web page shows would therefore be carried by every build that never shows it.
         width = 420
         portrait = finale.convert("RGB").resize(
             (width, round(finale.height * width / finale.width)), Image.LANCZOS)
@@ -257,6 +261,22 @@ def main() -> int:
         result["portrait"] = {"file": target.name, "size": [portrait.width, portrait.height],
                               "from": standing.name}
         print(f"portrait: {portrait.width}x{portrait.height}  (from {standing.name}, for the README)")
+
+        # The About box wants the same illustration at the height of the chibi it already shows.
+        # Height-matched rather than width-matched, because the two are packed side by side: matching
+        # widths would leave one of them two hundred pixels taller than its neighbour, and a row of
+        # pictures that disagree about their baseline reads as a mistake rather than as a pairing.
+        #
+        # The window is not touched by this. Tk reads a PNG and draws it; the size it draws is decided
+        # here, where the art is, rather than by asking the window to scale something at run time.
+        tilt = 320
+        matched = finale.convert("RGB").resize(
+            (round(finale.width * tilt / finale.height), tilt), Image.LANCZOS)
+        target = out / "portrait-about.png"
+        matched.save(target, optimize=True)
+        result["portrait_about"] = {"file": target.name, "size": [matched.width, matched.height],
+                                    "from": standing.name}
+        print(f"portrait-about: {matched.width}x{matched.height}  (from {standing.name}, for the About box)")
 
     manifest = out / "manifest.json"
     manifest.write_text(json.dumps(result, indent=2), encoding="utf-8")
