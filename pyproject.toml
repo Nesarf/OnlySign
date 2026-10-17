@@ -3,7 +3,7 @@ name = "onlysign"
 # Kept in step with the identity file, which is where the executable and the installer both read
 # their version from. It had drifted to 0.1.0 while the binaries said 1.0.0; `tools/build.py` now
 # refuses to build when the two disagree rather than letting a second number go wrong quietly.
-version = "1.0.1"
+version = "1.0.2"
 description = "Sign local build artifacts, and be able to say later what was signed."
 readme = "README.md"
 license = "Apache-2.0"
