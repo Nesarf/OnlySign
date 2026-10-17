@@ -2,6 +2,8 @@
 
 # OnlySign
 
+<img align="right" width="300" src="mark/portrait.png" alt="Morphea Amethyst, reading in her study">
+
 Sign local build artifacts, and be able to say later what was signed.
 
 Most people who need to sign a binary do not own a code signing certificate, have never made one,
@@ -207,6 +209,23 @@ Five things in `mark/` decide how the tool looks, and they are not interchangeab
 | `chibi-about.png` | the whole figure | the About window |
 | `onlysign.png` | the crop at 512 | the fallback when the others are missing |
 | `states.json` + eight pose files | what the character does | the result of every action |
+| `portrait.png` | the whole illustration, at page width | **nothing in the application** -- it is here because this page is also part of how the tool looks |
+
+| the close-up | the whole figure |
+|---|---|
+| ![the close-up](mark/onlysign-256.png) | ![the whole figure](mark/chibi-about.png) |
+| what goes on the file | what goes in the About box |
+
+Four of the nine outcomes, in the order the character answers them:
+
+<img src="mark/chibi-02-staff-cast.png" width="150" alt="signed: staff cast">
+<img src="mark/chibi-15-cauldron.png" width="150" alt="failed: the cauldron">
+<img src="mark/chibi-16-whisk.png" width="150" alt="changed: the whisk">
+<img src="mark/chibi-06-asleep.png" width="150" alt="gone: asleep">
+
+The character is **Morphea Amethyst**. The art is the publisher's own and lives outside this
+repository, because source art is large and a repository is for what a build needs; `portrait.png` and
+the tiles are the copies a build does need.
 
 The split between the close-up and the chibi is deliberate. A close-up face is what an icon should be
 -- it survives being sixteen pixels wide -- while a whole figure at sixteen pixels is a smudge with a
@@ -247,9 +266,11 @@ They are generated rather than hand-made:
 python tools/prepare-art.py --source "<the art directory>" --out .onlysign-art
 ```
 
-which cuts the character sheet into its sixteen poses, writes the standing art, and writes the four
-files above. `.onlysign-art/` is gitignored; the four in `mark/` are committed, because an icon that
-exists on one machine is an icon nobody else can build.
+which cuts the character sheet into its sixteen poses, writes the standing art, writes the four files
+above, and writes `portrait.png` at page width. `.onlysign-art/` is gitignored; the four the build
+reads are committed, because an icon that exists on one machine is an icon nobody else can build. So is
+`portrait.png`, for that reason and one more: a repository page that cannot show what the tool looks
+like has kept its best argument in a folder nobody opens.
 
 Two things about that script are worth knowing before changing it.
 

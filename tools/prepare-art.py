@@ -240,6 +240,24 @@ def main() -> int:
         result["standing"] = {"file": target.name, "size": [finale.width, finale.height]}
         print(f"standing: {finale.width}x{finale.height}  (from {standing.name})")
 
+        # The repository's own first impression. A different thing from `standing.png`: that one is
+        # kept at full size for anything that wants it, and this one is the size a README can show
+        # without the page becoming a download. 420 pixels wide is chosen from the page rather than
+        # from the art -- it is about the width of a paragraph at GitHub's reading column, so the
+        # picture sits beside the text instead of pushing it off.
+        #
+        # Nothing in the application reads this file. It is here because a repository whose
+        # presentation says nothing about what the tool looks like is a repository that has kept its
+        # best argument in a folder nobody opens.
+        width = 420
+        portrait = finale.convert("RGB").resize(
+            (width, round(finale.height * width / finale.width)), Image.LANCZOS)
+        target = out / "portrait.png"
+        portrait.save(target, optimize=True)
+        result["portrait"] = {"file": target.name, "size": [portrait.width, portrait.height],
+                              "from": standing.name}
+        print(f"portrait: {portrait.width}x{portrait.height}  (from {standing.name}, for the README)")
+
     manifest = out / "manifest.json"
     manifest.write_text(json.dumps(result, indent=2), encoding="utf-8")
 
