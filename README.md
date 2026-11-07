@@ -38,7 +38,7 @@ From a checkout, without building anything:
 ```powershell
 python -m onlysign.gui                          # the window
 python OnlySign.py                              # the same window, through the packaged entry point
-python -m onlysign selftest                     # run the engine against itself: 53 checks
+python -m onlysign selftest                     # run the engine against itself: 54 checks
 python -m onlysign selftest --keep              # leave the scratch directory behind to look at
 python tools/gui_smoke.py                       # drive the window the way a person would: 15 checks
 
@@ -413,7 +413,7 @@ onlysign/engine/bootmark.py  a mark in 512 bytes, for the machines that cannot v
 onlysign/mark.py             the mark line, and the carriers the verb puts it in
 onlysign/gui.py              the window; layout and a worker thread, nothing else
 onlysign/cli.py              the engine with a keyboard instead of a window
-onlysign/selftest.py         53 checks of the engine, in a scratch directory
+onlysign/selftest.py         54 checks of the engine, in a scratch directory
 tools/build.py               building the one-file executable
 tools/build-msi.py           building the installer, out of the executables that build made
 installer/onlysign.wxs       the installer's authoring; the publisher in it is a token
@@ -579,9 +579,9 @@ Built and checked at every level:
 
 | what | how it is checked |
 |---|---|
-| the engine | `python -m onlysign selftest` -- 53 checks, in a scratch directory |
+| the engine | `python -m onlysign selftest` -- 54 checks, in a scratch directory |
 | the window | `python tools/gui_smoke.py` -- 15 checks that open it and press its buttons |
-| both PowerShell editions | the same 53 checks under Windows PowerShell and under PowerShell 7 |
+| both PowerShell editions | the same 54 checks under Windows PowerShell and under PowerShell 7 |
 | the executable | about 13 MB, one file: lists certificates, answers `scan --help`, opens its window |
 | reading a container | `python tools/cfb-probe.py <dir>` -- every compound file in it, against its own header |
 

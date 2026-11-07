@@ -42,6 +42,12 @@ PASSED = 0
 FAILED = 0
 UNTESTED = 0
 
+# Every check that has been registered, in order. It exists for one check, the last one, which compares
+# the count the README advertises against the number of checks that actually run -- and it can only do
+# that if it can count itself, which is why it is registered last and why `check` records before it runs
+# rather than after.
+REGISTERED: list[str] = []
+
 
 class NotTested(Exception):
     """Raised by a check that could not be given what it needs, so it says nothing either way.
@@ -78,6 +84,8 @@ GATE_TEST_NOTICE = (
 
 def check(name: str, body) -> None:
     global PASSED, FAILED, UNTESTED
+    # Recorded before the body runs, so a check that counts the registry sees itself in it.
+    REGISTERED.append(name)
     try:
         body()
     except NotTested as exc:
@@ -1292,6 +1300,53 @@ def main() -> int:
              "the version in pyproject.toml against the one the binaries are built with")
 
     check("the version is written down in one place", the_version_is_written_down_once)
+
+    def the_readme_describes_this_repository_truthfully():
+        # A page that describes the code is part of the code's surface, and every claim on it has gone
+        # stale at least once: the count said 52 while 53 ran, and a topic on the repository page named a
+        # format the engine has never had. The claims below are answerable from this repository, so they
+        # are asked here rather than left to whoever remembers to diff the page by hand.
+        import re
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+        # Everything the page shows must exist. A missing file does not fail anything on a repository
+        # page; it draws a broken image, which is worse than showing nothing because a reader cannot tell
+        # a missing picture from a broken repository.
+        shown = sorted(set(re.findall(r"!\[[^\]]*\]\(([^)]+)\)", readme))
+                       | set(re.findall(r'<img[^>]+src="([^"]+)"', readme)))
+        absent = [ref for ref in shown if not (ROOT / ref).is_file()]
+        falsy(absent, f"the readme shows {absent}, which is not there")
+
+        # A path in backticks reads as "this is in the repository". Tried as written and under tools/,
+        # because the page names some scripts bare -- `terminal-probe.ps1` is `tools/terminal-probe.ps1`.
+        named = sorted(set(re.findall(r"`([A-Za-z0-9_./-]+\.(?:py|ps1))`", readme)))
+        missing = [name for name in named
+                   if not (ROOT / name).is_file() and not (ROOT / "tools" / name).is_file()]
+        falsy(missing, f"the readme names {missing}, which is not in the repository")
+
+        # The count is the claim most likely to go stale, because adding a check is exactly the moment
+        # nobody is looking at the page. Both sets are counted rather than taken from the page: the
+        # engine's from `REGISTERED` -- which already holds this check, because `check` records before it
+        # runs -- and the window's from the calls in `tools/gui_smoke.py`.
+        #
+        # Every number the page states must be one of those two. An earlier version of this check only
+        # asked that the engine's number appeared somewhere, and it passed when three of the four places
+        # still said the old figure; a claim is not checked by finding one copy of it that is right.
+        engine = len(REGISTERED)
+        gui = len(re.findall(r"^\s+check\(",
+                             (ROOT / "tools" / "gui_smoke.py").read_text(encoding="utf-8"),
+                             re.MULTILINE))
+        allowed = {engine, gui}
+        claimed = {int(n) for n in re.findall(r"(\d+) checks", readme)}
+        wrong = claimed - allowed
+        falsy(wrong,
+              f"the readme states {sorted(wrong)} check(s); there are {engine} in the engine and "
+              f"{gui} in the window, so the only numbers it may give are {sorted(allowed)}")
+
+    # Registered last on purpose: it is the only check that needs to know how many there are, and it is
+    # the only one whose own presence changes the number it is checking.
+    check("the readme describes this repository truthfully",
+          the_readme_describes_this_repository_truthfully)
 
     # --- cleaning up after itself --------------------------------------------- #
     if throwaway is not None:
