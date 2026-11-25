@@ -38,8 +38,8 @@ From a checkout, without building anything:
 ```powershell
 python -m onlysign.gui                          # the window
 python OnlySign.py                              # the same window, through the packaged entry point
-python -m onlysign selftest                     # run the engine against itself: 54 checks
-python -m onlysign selftest --keep              # leave the scratch directory behind to look at
+python -m onlysign.selftest                    # run the engine against itself: 54 checks
+python -m onlysign.selftest --keep             # leave the scratch directory behind to look at
 python tools/gui_smoke.py                       # drive the window the way a person would: 15 checks
 
 python -m onlysign scan  <project>              # propose artifacts, with the reason for each
@@ -579,15 +579,18 @@ Built and checked at every level:
 
 | what | how it is checked |
 |---|---|
-| the engine | `python -m onlysign selftest` -- 54 checks, in a scratch directory |
+| the engine | `python -m onlysign.selftest` -- 54 checks, in a scratch directory |
 | the window | `python tools/gui_smoke.py` -- 15 checks that open it and press its buttons |
 | both PowerShell editions | the same 54 checks under Windows PowerShell and under PowerShell 7 |
 | the executable | about 13 MB, one file: lists certificates, answers `scan --help`, opens its window |
 | reading a container | `python tools/cfb-probe.py <dir>` -- every compound file in it, against its own header |
 
-Three of the 38 need a timestamp authority, which is the only part of this toolchain that is not on
-this machine, so they can report a fourth outcome: **not tested**. A run that reached everything says
-`38 check(s) passed, 0 failed`; a run that could not says so in those words and names the three. This
+Seven of the 54 can report a fourth outcome, **not tested**, because a thing they need is not here:
+four need a timestamp authority, the only part of this toolchain that is not on this machine; one
+needs `unicorn` to execute the boot sector's machine code; one needs `pycdlib` to build a real ISO;
+and the version check needs `IDENTITY.local.json`, which is gitignored and absent from a published
+checkout. A run that reached everything says `54 check(s) passed, 0 failed`; a run that could not
+says so in those words and names what it was missing. This
 exists because of what the alternative cost: the first version asserted that the *first* authority
 answered, so one flaky answer from `timestamp.digicert.com` was reported as `signing did not
 succeed`, and the check after it -- which needs a signed file to refuse a second signature on -- then

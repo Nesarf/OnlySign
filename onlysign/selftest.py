@@ -1343,6 +1343,37 @@ def main() -> int:
               f"the readme states {sorted(wrong)} check(s); there are {engine} in the engine and "
               f"{gui} in the window, so the only numbers it may give are {sorted(allowed)}")
 
+        # The same claim in the other shape it is written in. The pattern above matches the plural
+        # ("54 checks"); the page also quotes what a run prints, which is "NN check(s) passed" --
+        # and that is the shape a reader takes as the tool's current state. It said 38, a figure from
+        # before the checks grew, and nothing asked, because only the plural was looked for. A number
+        # quoted as output is a claim about this repository in exactly the same way.
+        passing = {int(n) for n in re.findall(r"(\d+) check\(s\) passed", readme)}
+        wrong_output = passing - allowed
+        falsy(wrong_output,
+              f"the readme quotes {sorted(wrong_output)} as the number a run prints; the only "
+              f"numbers a run can print are {sorted(allowed)}")
+
+        # A command on the page is an instruction, and one that does not parse is worse than a
+        # missing file: the reader runs it, gets a usage error and concludes the tool is broken.
+        # Two shapes are named -- `python -m onlysign.<module>` for the parts that are their own
+        # entry point, and `python -m onlysign <verb>` for the command line's own verbs. The verb
+        # pattern requires the space, so that the fixed `onlysign.selftest` is not read as a verb
+        # called `selftest`; missing that distinction is what this check was extended for.
+        import importlib.util
+
+        from onlysign import cli
+
+        for module in sorted(set(re.findall(r"python -m onlysign\.([A-Za-z0-9_]+)", readme))):
+            falsy(importlib.util.find_spec("onlysign." + module) is None,
+                  "the readme says `python -m onlysign." + module + "`, which is not a module in "
+                  "this repository")
+        verbs = sorted(set(re.findall(r"python -m onlysign ([a-z][a-z-]*)", readme)))
+        unknown = [verb for verb in verbs if verb not in cli.command_names()]
+        falsy(unknown,
+              f"the readme says `python -m onlysign {unknown}`, which the command line does not "
+              f"accept; its verbs are {cli.command_names()}")
+
     # Registered last on purpose: it is the only check that needs to know how many there are, and it is
     # the only one whose own presence changes the number it is checking.
     check("the readme describes this repository truthfully",
