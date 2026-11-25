@@ -1,0 +1,287 @@
+{
+  "title": "OnlySign：本机签名器与它自己的证据链",
+  "sections": [
+    "structure",
+    "units",
+    "status",
+    "plan",
+    "environment"
+  ],
+  "structure": {
+    "layout": "onlysign/ 是引擎与窗口，tools/ 是构建与检查，mark/ 是随可执行文件走的美术，docs/ 是只给页面看的大图，installer/ 是 WiX 源。dist/ 与 build/ 是产物，不进版本控制。",
+    "entries": {
+      "onlysign/engine/": "签什么、记什么、怎么核的那一层；窗口只画它已经判定过的东西",
+      "onlysign/selftest.py": "引擎的自测；它同时是「页面是否仍描述本仓库」的那一问所在",
+      "tools/": "构建、安装包、美术预处理、窗口冒烟、版本一致性；每一个都能单独跑",
+      "mark/": "全部随可执行文件打包的美术，构建会把这个目录里每个文件都带进包",
+      "docs/": "只给仓库页面看的图，刻意不进 mark/，否则每个构建都驮着它",
+      "installer/": "WiX 源与它的扩展；扩展是下载物，被忽略"
+    }
+  },
+  "status": {
+    "summary": "v1.0.3 已发布（三个资产、签名加时间戳、下载回验）。引擎自测 54 项（52 通过、2 项因可选依赖缺席报未测），窗口自测 15 项，CI 在两个 PowerShell 版本上各跑一遍。三处已知缺口见 open 目标。",
+    "asOf": "2026-11-26",
+    "metrics": {
+      "goalsDone": 10,
+      "goalsOpen": 4
+    }
+  },
+  "environment": {
+    "tools": [
+      "python",
+      "powershell",
+      "pwsh",
+      "pyinstaller",
+      "wix",
+      "signtool",
+      "gh"
+    ],
+    "runtimes": [
+      "Python 3.14.10",
+      "Windows PowerShell 5.1",
+      "PowerShell 7"
+    ],
+    "borrowed": [
+      "PyInstaller（构建，需现装；本机 6.22.3）",
+      "WiX 5.0.2（安装包；7.x 会先要求接受 OSMF EULA，故钉在 5）",
+      "signtool（Windows SDK，只用于独立复核）",
+      "unicorn 与 pycdlib（可选，缺席时对应两项自测如实报未测而不是失败）"
+    ]
+  },
+  "goals": [
+    {
+      "id": "engine",
+      "title": "引擎：签、记、核、标、闸五条路，一个二进制两扇门",
+      "scope": "capability",
+      "status": "done",
+      "parent": null,
+      "after": [],
+      "source": "onlysign/cli.py",
+      "notes": "不带参数开窗，带动词走命令行。动词是 scan、certs、sign、check、gate、trust、mark；窗口不自己判定任何东西。",
+      "touches": [
+        "onlysign/cli.py",
+        "onlysign/engine/"
+      ],
+      "verifiedBy": [
+        "onlysign/selftest.py"
+      ]
+    },
+    {
+      "id": "ledger",
+      "title": "账本：NDJSON，逐行按哈希链住",
+      "scope": "capability",
+      "status": "done",
+      "parent": "engine",
+      "after": [],
+      "source": "onlysign/engine/ledger.py",
+      "notes": "一行一个 JSON，prev 是上一行原文的 sha256。被账本没有记录的东西改动过的文件，报告用最重的一句说出来。",
+      "touches": [
+        "onlysign/engine/ledger.py",
+        "onlysign/engine/audit.py"
+      ],
+      "verifiedBy": [
+        "onlysign/selftest.py"
+      ]
+    },
+    {
+      "id": "mark",
+      "title": "标记：给无处可签的格式留一个还能验的摘要",
+      "scope": "capability",
+      "status": "done",
+      "parent": "engine",
+      "after": [
+        "ledger"
+      ],
+      "source": "onlysign/mark.py",
+      "notes": "zip 注释、追加的 tar 成员、ISO 的 Application Use 字段、512 字节引导扇区。摘要写在标记之后仍然描述这个文件，所以标记必须在签名之前，不能之后。",
+      "touches": [
+        "onlysign/mark.py",
+        "onlysign/engine/bootmark.py",
+        "onlysign/engine/container.py"
+      ],
+      "verifiedBy": [
+        "onlysign/selftest.py"
+      ]
+    },
+    {
+      "id": "gui",
+      "title": "窗口：只画引擎已判定的结论",
+      "scope": "capability",
+      "status": "done",
+      "parent": "engine",
+      "after": [],
+      "source": "onlysign/gui.py",
+      "notes": "Tk 的窗口从外面读不到内容（内容区是无名 TkChild），所以它自带 --tabs 与 --geometry 这几个只为被检查而存在的开关：一个构建出来的可执行文件必须能替自己回答。",
+      "touches": [
+        "onlysign/gui.py",
+        "tools/gui_smoke.py"
+      ],
+      "verifiedBy": [
+        "tools/gui_smoke.py"
+      ]
+    },
+    {
+      "id": "art",
+      "title": "美术：随包的与只给页面的，分开放",
+      "scope": "capability",
+      "status": "done",
+      "parent": null,
+      "after": [],
+      "source": "tools/prepare-art.py",
+      "notes": "mark/ 里每个文件都会被打进可执行文件，所以只给网页看的大图放 docs/。立绘与 Q 版并排放在关于页，因为它们回答的不是同一个问题，而两张图的高度在图生成时就对齐，不交给窗口在运行时缩放。",
+      "touches": [
+        "mark/",
+        "docs/portrait.png",
+        "tools/prepare-art.py"
+      ],
+      "verifiedBy": [
+        "tools/gui_smoke.py"
+      ]
+    },
+    {
+      "id": "selftest",
+      "title": "引擎自测：54 项，其中两项按依赖缺席如实报未测",
+      "scope": "verification",
+      "status": "done",
+      "parent": "engine",
+      "after": [],
+      "source": "onlysign/selftest.py",
+      "notes": "能报「未测」的共七处来源：四项要靠时间戳权威应答，一项要 unicorn 执行引导扇区机器码，一项要 pycdlib 造出真 ISO，一项要那个被忽略的身份文件。未测不计入失败，因为一个会因为公共时间戳服务器忙而变红的 job，是教人忽略它的 job。",
+      "touches": [
+        "onlysign/selftest.py"
+      ],
+      "verifiedBy": [
+        "onlysign/selftest.py"
+      ]
+    },
+    {
+      "id": "readme-check",
+      "title": "页面与代码一致：四种失效形状，两种能问得出来",
+      "scope": "verification",
+      "status": "done",
+      "parent": "selftest",
+      "after": [],
+      "source": "onlysign/selftest.py",
+      "notes": "同一个数在页面上有几种写法，就要问几次：复数（54 checks）与输出形式（NN check(s) passed）是两张不同的脸，只问前一种时，写成输出的那个数从来没被比过。页面上的命令也要能解析：python -m onlysign.<模块> 得是存在的模块，python -m onlysign <动词> 得是命令行接受的动词，而识别动词的那条正则必须带那个空格，否则修好的 onlysign.selftest 会被读成一个叫 selftest 的动词。",
+      "touches": [
+        "onlysign/selftest.py",
+        "README.md"
+      ],
+      "verifiedBy": [
+        "onlysign/selftest.py"
+      ]
+    },
+    {
+      "id": "ci",
+      "title": "最小 CI：每个变更都跑，且两个 PowerShell 版本各跑一遍",
+      "scope": "verification",
+      "status": "done",
+      "parent": "selftest",
+      "after": [],
+      "source": ".github/workflows/selftest.yml",
+      "notes": "只能 Windows：签名走 Windows 自带的 Set-AuthenticodeSignature。两个版本不能省——它们已经分道扬镳过一次（ConvertFrom-Json 在 6.0 起会把 ISO 时间串推成 DateTime，7 下七个调用点全炸，5.1 下一个都不炸）。版本号一致性在这条工作流里另有一问，因为那条守卫只在有人构建时才跑。",
+      "touches": [
+        ".github/workflows/selftest.yml",
+        "tools/ci-version-agrees.py"
+      ],
+      "verifiedBy": [
+        "tools/ci-version-agrees.py"
+      ]
+    },
+    {
+      "id": "release",
+      "title": "发布：三个资产，签名加时间戳，下载回来对哈希",
+      "scope": "release",
+      "status": "done",
+      "parent": "ci",
+      "after": [
+        "selftest",
+        "ci"
+      ],
+      "source": "tools/build.py",
+      "notes": "窗口版与控制台版是两次构建，输出名相同，先建控制台再改名，否则窗口版被覆盖而两行日志长得一样。版本资源用中立措辞；这一处与 v1.0.1 的不一致已在那一版的说明里留了注记，原文没有重写。上传之后三个资产逐个下载回来对哈希：GitHub 报的大小不等于下载完整。",
+      "touches": [
+        "tools/build.py",
+        "tools/build-msi.py",
+        "installer/onlysign.wxs"
+      ],
+      "verifiedBy": [
+        "onlysign/selftest.py"
+      ]
+    },
+    {
+      "id": "local-toolchain",
+      "title": "另一条本机私有的发布工具链，由本工程维护",
+      "scope": "maintenance",
+      "status": "done",
+      "parent": null,
+      "after": [],
+      "source": null,
+      "notes": "有一个本机私有的签名发布工具链，2026-11-26 起由本工程直接维护，此前只允许检查、报告、交补丁。它不进本仓库、不进任何远端，这是它自己的规矩，接管维护不等于发布。所以这张地图只记这层边界，不记它的名字、路径与内部细节：一份会进公开仓库的计划，不该把私有物的清单带出去。它现在有 24 项自测。",
+      "touches": [],
+      "verifiedBy": []
+    },
+    {
+      "id": "console-help",
+      "title": "不带动词的 --help 落在窗口那一侧，不是命令行那一侧",
+      "scope": "defect",
+      "status": "open",
+      "parent": "engine",
+      "after": [],
+      "source": "onlysign/cli.py",
+      "notes": "实测：OnlySign-console.exe --help 打出的是 onlysign-gui 的用法（--check、--tabs、--geometry），而 scan --help 打出的是命令行的用法。一个控制台构建被问 --help 时，回答应该属于命令行那一扇门。它现在不挡任何事，是两扇门的分界没在帮助上体现出来。",
+      "touches": [
+        "onlysign/cli.py",
+        "onlysign/gui.py"
+      ],
+      "verifiedBy": []
+    },
+    {
+      "id": "gui-in-ci",
+      "title": "窗口自测不在 CI 里，只在有人记得时跑",
+      "scope": "gap",
+      "status": "open",
+      "parent": "ci",
+      "after": [
+        "ci"
+      ],
+      "source": ".github/workflows/selftest.yml",
+      "notes": "工作流注释里写明了不放进来的理由：窗口冒烟要真签一个文件、会和全世界抢同三个时间戳权威，红了也不是代码的原因。理由成立，代价是 15 项检查退回成「在这台机器上、有人记得的时候」。出路是把它拆成需要网络的与不需要网络的两段，后者进 CI。",
+      "touches": [
+        ".github/workflows/selftest.yml",
+        "tools/gui_smoke.py"
+      ],
+      "verifiedBy": [
+        "tools/gui_smoke.py"
+      ]
+    },
+    {
+      "id": "optional-deps",
+      "title": "两项自测在本机一直报未测，因为 unicorn 与 pycdlib 没装",
+      "scope": "gap",
+      "status": "open",
+      "parent": "selftest",
+      "after": [],
+      "source": "onlysign/selftest.py",
+      "notes": "引导扇区那项要靠 unicorn 执行机器码，ISO 那项要靠 pycdlib 造出真镜像。装上就真跑，而本机一直没装，于是这两条路径的证据来自「CI 上装了的时候」，不是来自这台机器。装不装是取舍：它们是可选依赖，而这个工具没有任何必需依赖这件事本身值得保。",
+      "touches": [
+        "onlysign/selftest.py"
+      ],
+      "verifiedBy": [
+        "onlysign/selftest.py"
+      ]
+    },
+    {
+      "id": "third-party-reports",
+      "title": "三份交给维护者的报告仍停在「已交」",
+      "scope": "maintenance",
+      "status": "open",
+      "parent": null,
+      "after": [],
+      "source": null,
+      "notes": "读取层分类、判决来源、脚本清单这三件事各有一份报告与补丁，都跑过也验过，但采纳与否不在本工程这一侧。地图把它们记成 open，因为它们确实还没落进被维护的那棵树，而不是因为有人在等。",
+      "touches": [],
+      "verifiedBy": []
+    }
+  ]
+}
