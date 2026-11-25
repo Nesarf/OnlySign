@@ -35,3 +35,22 @@ installer/extensions/
 # neutral, and the art belongs to its publisher. What is committed is the four files in mark/ that a
 # build actually needs, not the working material behind them.
 .onlysign-art/
+
+# The toolchain under smyt/ is code. What makes it run -- the certificate, the password sealed in a
+# container, the key that opens it, and the ledger of what has been signed -- is not code and does not
+# belong in a repository, public or otherwise. The ledger most of all: it is a complete inventory of
+# what has been signed and where each build sat on disk, which is a different kind of thing from a key.
+#
+# The pattern `*.pfx` above already covers one of these. This names the rest, so that "which files are
+# the material" is answered here rather than by whoever last copied the directory in.
+smyt/*.cer
+smyt/*.sealed
+smyt/*.key
+smyt/*.ndjson
+smyt/*.bak-*
+smyt/.git/
+
+# Where this machine keeps that material. Written down for the next session, not published: it names a
+# path, and a path is about one machine rather than about the tool.
+smyt/README.local.md
+smyt/SIGNING-DIR.local.txt

@@ -421,7 +421,29 @@ tools/gui_smoke.py           15 checks that drive the window itself
 tools/cfb-probe.py           what a compound file's header says, against what the reader returned
 tools/boot-check.py          boots the mark sector on real firmware (needs QEMU; not a check)
 dist/                        built executables and installer (not committed)
+smyt/                        the signing and publishing toolchain this project maintains (code only)
 ```
+
+## The toolchain under `smyt/`
+
+`smyt/` is the signing and publishing toolchain this project maintains. It predates the engine here and
+answers a different question: the engine signs a file and can still say later what was signed, while the
+toolchain runs a whole release -- choose the artifacts, sign them, produce a checksum list for the ones
+that cannot hold a signature, and publish. Its checks are its own, and they run on their own.
+
+**Only the code is here.** What makes it run -- the certificate, the password sealed in a container, the
+key that opens it, and the ledger of what has been signed -- stays outside this repository. The ledger
+most of all: it is a complete inventory of what has been signed and where each build sat on disk, which
+is a different kind of thing from a key. `.gitignore` names each of those files, so the rule does not
+depend on whoever last copied the directory in.
+
+That is also why `-SigningDir` has to be given when running it from a checkout: the scripts default to
+the directory they live in, and the material does not live here.
+
+Its default certificate subject names the organisation that owns the certificate, and the scripts say so
+throughout. That is not something this layout disclosed: both v1.0.1 and v1.0.2 of the published
+binaries carry the same subject in their signer field, because that is who signed them. What ships as
+`its publisher` is the version resource, which is a different field.
 
 ## A mark, and where it does not belong
 

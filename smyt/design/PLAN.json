@@ -1,0 +1,191 @@
+{
+  "title": "SMYT：本机私有的签名与发布工具链",
+  "sections": ["structure", "units", "status", "plan", "environment"],
+  "structure": {
+    "layout": "根目录放脚本与证书材料，mark/ 放标识图，history/ 由工具在换证书时写入。这个目录默认拒绝一切，白名单逐名放行。",
+    "entries": {
+      "smyt-sign.ps1": "动词入口：Sign / Verify / Check / CheckFile / Status / Relocate / Trust / Protect / Log",
+      "smyt-common.ps1": "路径表、哈希、账本读写与追加、签名查询；读和写的编码都在这里钉死",
+      "smyt-blob.ps1": "给无处安放签名的格式做标记的底层（zip 注释、tar 成员、ISO 字段、引导扇区）",
+      "smyt-selftest.ps1": "24 项自测；样例自己从账本里挑一个本工具签过的构建，剥掉签名再用",
+      "smyt-release.ps1": "发布流程的骨架；release-nanodesu / release-mega / sign-github-release 是具体项目",
+      "publish-checksums.ps1": "给那些放不进签名的产物出校验清单，顺序不能错",
+      "seal.mjs": "把口令封进容器的密封侧，与 Get-SmytPfxPassword 的偏好配套",
+      "CHANGES.md": "改动账；只追加，不改写，更正也是一条新条目"
+    }
+  },
+  "status": {
+    "summary": "24 项自测全过。2026-11-26 起由 OnlySign 直接维护，三项待审编辑被采纳，-Relocate 落进工具本身。本机私有，无远端。三处仍在等的缺口见 open 目标。",
+    "asOf": "2026-11-26",
+    "metrics": {
+      "goalsDone": 10,
+      "goalsOpen": 3
+    }
+  },
+  "environment": {
+    "tools": ["powershell", "pwsh", "signtool", "node", "gh"],
+    "runtimes": ["Windows PowerShell 5.1", "PowerShell 7", "Node"],
+    "borrowed": [
+      "signtool（Windows SDK）：只在复核时用，签名本身走 PowerShell 自带的 Set-AuthenticodeSignature",
+      "三个公共 RFC 3161 时间戳权威，按顺序试"
+    ]
+  },
+  "goals": [
+    {
+      "id": "sign",
+      "title": "签名：PE、MSI、CAB，带时间戳，不加盖第二次",
+      "scope": "capability",
+      "status": "done",
+      "parent": null,
+      "after": [],
+      "source": "smyt-sign.ps1",
+      "notes": "签名走 Windows 自带的 Set-AuthenticodeSignature，所以这台机器上不需要 Windows SDK 才能签。已经带签名的文件默认拒绝再签：Authenticode 是追加而不是替换，签第二次会让账本里那条『签之前是什么』的哈希变成上一次签名的输出，那个字段就开始说谎。",
+      "touches": ["smyt-sign.ps1", "smyt-common.ps1"],
+      "verifiedBy": ["smyt-selftest.ps1"]
+    },
+    {
+      "id": "ledger",
+      "title": "账本：NDJSON，逐行按哈希链住，追加要独占",
+      "scope": "capability",
+      "status": "done",
+      "parent": "sign",
+      "after": [],
+      "source": "smyt-common.ps1",
+      "notes": "追加是两个发布进程唯一会撞上的操作，而链会让这次相撞看起来像篡改：两条记录指向同一个前驱，链就报分叉。所以 tip 不在调用方读，而是在一个排斥其他写者的句柄里读、写完再放。字节用显式编码器写，不用 Add-Content -Encoding UTF8——写者不该让读者去猜，猜正是这个文件曾经读不出来的原因。",
+      "touches": ["smyt-common.ps1"],
+      "verifiedBy": ["smyt-selftest.ps1"]
+    },
+    {
+      "id": "sealed-password",
+      "title": "口令：封进容器，明文那一份已经删了",
+      "scope": "capability",
+      "status": "done",
+      "parent": "sign",
+      "after": [],
+      "source": "seal.mjs",
+      "notes": "Get-SmytPfxPassword 优先读封印形态。这条不能回退：它替代掉的明文已经被删除，回退之后工具就读不到口令了。封印路径现在有自测（『the sealed container』那一项），而它是每一次将来签名都要走的路。",
+      "touches": ["seal.mjs", "smyt-common.ps1"],
+      "verifiedBy": ["smyt-selftest.ps1"]
+    },
+    {
+      "id": "relocate",
+      "title": "-Relocate：先验字节，再追加搬迁记录",
+      "scope": "capability",
+      "status": "done",
+      "parent": "ledger",
+      "after": ["ledger"],
+      "source": "smyt-sign.ps1",
+      "notes": "两个具名标量而不是一个数组：数组形状在 powershell -File 下根本递不进去（两个路径变成一个元素加一个游离位置参数），而这个工具链内部所有调用者——包括自测的 Invoke-Sign——都走 -File。一个自己的自测驱动不了的动词，等于没被覆盖。两种哈希都可匹配，记录里写明验的是哪一种；账本没见过的文件拒绝，并说去签名它。",
+      "touches": ["smyt-sign.ps1"],
+      "verifiedBy": ["smyt-selftest.ps1"]
+    },
+    {
+      "id": "check-verdicts",
+      "title": "-Check：六个判决，每一个都要被走到、被命名、被计数",
+      "scope": "capability",
+      "status": "done",
+      "parent": "ledger",
+      "after": ["ledger"],
+      "source": "smyt-sign.ps1",
+      "notes": "判决逻辑是最新的一段代码，也曾经是唯一靠肉眼看输出验证的部分——那正是会烂的部分。现在用手写账本加五个夹具，一条判决一个，断言每一个都被走到。",
+      "touches": ["smyt-sign.ps1", "smyt-selftest.ps1"],
+      "verifiedBy": ["smyt-selftest.ps1"]
+    },
+    {
+      "id": "checksums",
+      "title": "校验清单：给放不进签名的产物留一份可核的账",
+      "scope": "capability",
+      "status": "done",
+      "parent": "sign",
+      "after": ["sign"],
+      "source": "publish-checksums.ps1",
+      "notes": "二十五个装不下签名的产物靠清单加分离签名。顺序是这个脚本存在的理由：清单必须在产物定稿之后、在签名之前生成，反过来就会描述一批已经不是那个样子的字节。",
+      "touches": ["publish-checksums.ps1"],
+      "verifiedBy": ["smyt-selftest.ps1"]
+    },
+    {
+      "id": "release-scripts",
+      "title": "发布脚本：一个入口，顺序不能由调用方决定",
+      "scope": "capability",
+      "status": "done",
+      "parent": "sign",
+      "after": ["checksums"],
+      "source": "smyt-release.ps1",
+      "notes": "每个项目一个薄壳（nanodesu、mega、vml），共用同一个骨架。两个曾经真踩到的问题写在这里：-SigningDir 一度只停在骨架边缘、骨架又在包装器边缘停一次，于是一次对着复制证书的彩排仍然把记录写进了真账本；以及给一个阶段目录定一个所有者，让中断的那一次怪自己而不是怪下一次。",
+      "touches": ["smyt-release.ps1", "release-nanodesu.ps1", "release-mega.ps1", "sign-github-release.ps1"],
+      "verifiedBy": ["smyt-selftest.ps1"]
+    },
+    {
+      "id": "selftest",
+      "title": "自测：24 项，样例自己从账本里找",
+      "scope": "verification",
+      "status": "done",
+      "parent": null,
+      "after": [],
+      "source": "smyt-selftest.ps1",
+      "notes": "样例不能随便拿一个文件：explorer.exe 清掉证书表之后仍会被本机安全目录报出签名者，notepad.exe 与 powershell.exe 根本没有嵌入证书表可清。可靠的做法是取一个本工具签过的构建、复制、剥签名——所以自测去账本里找候选。它还自带『环境守卫』，把本 PowerShell 自己的模块目录排在最前。",
+      "touches": ["smyt-selftest.ps1"],
+      "verifiedBy": ["smyt-selftest.ps1"]
+    },
+    {
+      "id": "no-remote",
+      "title": "没有远端，而且不该有",
+      "scope": "maintenance",
+      "status": "done",
+      "parent": null,
+      "after": [],
+      "source": null,
+      "notes": "这套工具链是本机资产：不发布，也不去互联网——公开仓库与私有仓库都不去。接手的会话发现这里没有 origin，那是设计，不是待补的缺口。同一个判断在 .gitignore 里也写着：默认拒绝一切，放行要逐名、要记清是谁放的、为什么。接管维护与对外发布是两句话，不该被读成一句。",
+      "touches": [".gitignore"],
+      "verifiedBy": []
+    },
+    {
+      "id": "path-migration",
+      "title": "工具根搬到 D 盘，二十个默认路径跟着搬",
+      "scope": "maintenance",
+      "status": "done",
+      "parent": null,
+      "after": [],
+      "source": "smyt-common.ps1",
+      "notes": "搬目录本身简单，难的是那些写死在第一版里的默认值。当时的核对方式是逐个把默认值打出来看它指向哪里，而不是假设备份脚本已经覆盖了。",
+      "touches": ["smyt-common.ps1", "smyt-sign.ps1", "CHANGES.md"],
+      "verifiedBy": ["smyt-selftest.ps1"]
+    },
+    {
+      "id": "read-layer",
+      "title": "读取层该分开『签名』与『事件』，-Status 现在数错",
+      "scope": "defect",
+      "status": "open",
+      "parent": "ledger",
+      "after": ["ledger"],
+      "source": "smyt-common.ps1",
+      "notes": "实测：账本 173 条里 41 条是签名、其余是各类事件，而 -Status 与 -Check 打出的『15 without a timestamp』把事件当成了没有时间戳的签名记录下来——真值是 0。分类所需的信息就在记录里（有没有 timestamped 这个字段），所以修法是把读取层分类出来，而不是去改计数那一行。补丁已写好并跑过，仍在等落进这棵树。",
+      "touches": ["smyt-common.ps1", "smyt-sign.ps1"],
+      "verifiedBy": ["smyt-selftest.ps1"]
+    },
+    {
+      "id": "verdict-origin",
+      "title": "判决的来源：signtool 读文件，Windows 读本机的信任书",
+      "scope": "defect",
+      "status": "open",
+      "parent": "check-verdicts",
+      "after": [],
+      "source": "smyt-common.ps1",
+      "notes": "同一个文件上两个问题两个答案：signtool verify /pa 读贴在文件上的签名，Get-AuthenticodeSignature 会去查本机安全目录，所以它能给一个根本没带签名的文件报出签名者。受控测量做过（剥掉 10064 字节证书表的文件仍报 Valid 并指名同一个证书），代价是一个刚被剥掉签名的文件会被判成 CHANGED——本工具能打印的最重的一句。修法是让判决说清它问的是哪一问，补丁在等。",
+      "touches": ["smyt-common.ps1", "smyt-sign.ps1"],
+      "verifiedBy": ["smyt-selftest.ps1"]
+    },
+    {
+      "id": "script-manifest",
+      "title": "脚本本身的清单：谁改过哪个字节",
+      "scope": "gap",
+      "status": "open",
+      "parent": null,
+      "after": [],
+      "source": null,
+      "notes": "报告里提过一版清单，然后卡在一个还没定的问题上：清单要不要用签名钥匙签？那会把同一把钥匙压在工具自身的完整性上，而这个工具链自己的立场是不该成为唯一拿得到钥匙的东西。本地版本控制已经让『谁改过哪个字节』可回答，所以这条缺口的紧迫性下降了，但没有消失。",
+      "touches": [],
+      "verifiedBy": []
+    }
+  ]
+}

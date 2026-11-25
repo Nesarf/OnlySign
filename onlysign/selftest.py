@@ -1336,6 +1336,12 @@ def main() -> int:
         gui = len(re.findall(r"^\s+check\(",
                              (ROOT / "tools" / "gui_smoke.py").read_text(encoding="utf-8"),
                              re.MULTILINE))
+        # Two counts, and deliberately not three. The toolchain under smyt/ has checks of its own, and
+        # this page names none of them: four of those are built inside a foreach and two more are
+        # skipped unless a switch is passed, so its total is what a run produces rather than something
+        # that can be counted out of the source the way these two can. A number nobody can recount from
+        # the repository is the shape of claim this check exists to refuse, so the page stays quiet
+        # about that one instead of quoting it approximately.
         allowed = {engine, gui}
         claimed = {int(n) for n in re.findall(r"(\d+) checks", readme)}
         wrong = claimed - allowed
